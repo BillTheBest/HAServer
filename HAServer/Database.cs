@@ -16,7 +16,7 @@ namespace HAServer
             try
             {
                 Database.Logger.LogInformation("Starting Automation database...");
-
+                return; ////
                 var dbName = "test";
                 var dbBuild = new SqliteConnectionStringBuilder("Data Source=" + dbFileLoc + dbName + ".db");
                 SqliteConnection dbConn = new SqliteConnection(dbBuild.ConnectionString);
@@ -41,5 +41,9 @@ namespace HAServer
             }
         }
 
+        // Any shutdown code
+        public void Shutdown()
+        {
+        }
     }
 }

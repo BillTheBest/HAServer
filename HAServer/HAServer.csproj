@@ -4,6 +4,9 @@
     <TargetFramework>netcoreapp1.1</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <None Remove="influxdb.conf" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="InfluxDB.Net.Core" Version="1.1.22-beta" />
     <PackageReference Include="Microsoft.AspNetCore.ResponseCaching" Version="1.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.ResponseCompression" Version="1.0.0" />
@@ -21,6 +24,9 @@
   <ItemGroup>
     <Folder Include="wwwroot\" />
     <Folder Include="wwwroot\" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\InfluxDB\influxdb.conf" Link="influxdb.conf" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Commons\Commons.csproj" />

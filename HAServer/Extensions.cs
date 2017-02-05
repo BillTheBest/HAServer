@@ -46,7 +46,6 @@ namespace HAServer
                                 {
                                     Logger.LogInformation("Extension " + extName.ToUpper() + " (" + extCfg.GetSection("ExtensionCfg:Desc").Value + ") enabled, loading...");
                                     var myAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
-
                                     //var tt = myAssembly.GetTypes();             ////////// TEST
 
                                     extensions[extName] = Activator.CreateInstance(myAssembly.GetType(extName + ".FW")) as IExtension;
@@ -55,7 +54,6 @@ namespace HAServer
                                     {
                                         Thread thread = new Thread(delegate ()                                                                  // Run extension on its own thread
                                         {
-                                            var yy = extensions[extName].name;
                                             var extStart = (string)extensions[extName].ExtStart(Core.pubSub);                                   // Start with reference to pubsub instance so plugin can contact host.
                                             if (extStart != "OK")
                                             {
@@ -65,7 +63,8 @@ namespace HAServer
                                             {
                                                 Logger.LogInformation("Extension " + extName.ToUpper() + " started with status: " + extStart);
                                             }
-                                        });
+                                        })
+                                        { IsBackground = true };
                                         thread.Start();
                                     } else
                                     {
@@ -98,6 +97,11 @@ namespace HAServer
                 throw ex;
             }
 
+        }
+
+        // Any shutdown code
+        public void Shutdown()
+        {
         }
     }
 }

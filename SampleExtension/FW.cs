@@ -37,7 +37,7 @@ namespace SampleExtension
             try
             {
                 _host = myHost;
-                _host.Publish("sample1", new ChannelKey { network = "SS", category = "LIGHTING", className = "XXX", instance = "WWW" }, "DATA");
+                _host.Publish("sample1", new ChannelKey { network = "SS", category = "LIGHTING", className = "XXX", instance = "WWW" }, "MYSCOPE", "MYDATA");
                 _host.Subscribe("sample2", new ChannelKey { network = "SS", category = "LIGHTING", className = "XXX", instance = "WWW" }, "xx");
                 //var t = 0;
                 //var y = 1 / t;

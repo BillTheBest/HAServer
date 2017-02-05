@@ -5,50 +5,14 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using Interfaces;
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 //clients are <plugin/extension.clientname>
 //TODO: Persist user group table to file and secure it, modify access via admin UI
 
 namespace HAServer
 {
-/*    public interface IExtension
-    {
-        string ExtStart(IPubSub myHost);
-        string ExtStop(string param);
-    }
-
-    public interface IPubSub
-    {
-        bool AddUpdChannel(ChannelKey channel, ChannelSub channelSub, [CallerMemberName] string caller = "");
-        string Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
-        bool Publish(string clientName, ChannelKey channel, string message, [CallerFilePath] string caller = "");
-    }
-
-    public struct ChannelKey
-    {
-        public string network;
-        public string category;
-        public string className;
-        public string instance;
-    }
-
-    public struct AccessAttribs
-    {
-        public string name;
-        public string access;
-    }
-
-    public class ChannelSub
-    {
-        public bool active = true;
-        public string desc = "";
-        public string type = "GENERIC";
-        public string author = "";
-        public List<AccessAttribs> clients = new List<AccessAttribs>();                                         // List of clients subscribed & their access rights. This is set when subscribing to enable fast lookup when processing messages
-        public List<AccessAttribs> auth = new List<AccessAttribs>();                                            // When subscribing, clients must be a member of one of these groups & will get the access rights of that group
-        public List<KeyValuePair<string, string>> attribs = new List<KeyValuePair<string, string>>();
-    } */
-
     public class PubSub : IPubSub
     {
         static ILogger Logger { get; } = ApplicationLogging.CreateLogger<PubSub>();
@@ -59,10 +23,29 @@ namespace HAServer
         // User group table
         private static ConcurrentDictionary<string, List<string>> clientGroups = new ConcurrentDictionary<string, List<string>>();
 
+        // Main message queue
+        private static BlockingCollection<Commons.HAMessage> messQ = new BlockingCollection<Commons.HAMessage>();
+
+        private static Consts.ServiceState _serviceState = Consts.ServiceState.STOPPED;
+
         public PubSub()
         {
             try
             {
+                Task.Factory.StartNew(() =>                                                                 // Manage messages on the queue
+                {
+                    foreach (Commons.HAMessage HAMessage in messQ.GetConsumingEnumerable())
+                    {
+                        while (_serviceState != Consts.ServiceState.RUNNING) Thread.Sleep(10);              // If the service has stopped or paused, block don't process the message queue
+
+                        Task.Factory.StartNew(() => HandleMessage(HAMessage));                              // Start message consumer tasks
+
+                        if (Core.DebugMode) Logger.LogDebug(String.Format("Category: {0}, Class: {1}, Instance: {2}, Scope: {3}, Data: {4}", HAMessage.category, HAMessage.className, HAMessage.instance, HAMessage.scope, HAMessage.data));
+                    }
+                }, TaskCreationOptions.LongRunning);
+
+                _serviceState = Consts.ServiceState.PAUSED;                                                 // Accept messages but wait for all the services to start before processing
+
                 // Test
                 List<string> users = new List<string>();
                 clientGroups["ADMINS"] = new List<string> { "PubSub.myClient" };
@@ -107,10 +90,41 @@ namespace HAServer
             }
         }
 
-        public bool Publish(string clientName, ChannelKey channel, string message, [CallerFilePath] string caller = "")
+        // THREAD: Handle messages from the message queue
+        public void HandleMessage(Commons.HAMessage myMessage)
         {
-            Logger.LogInformation("Client: " + clientName + " published to: " + channel.instance + " TEST");
-            return true;
+            Logger.LogInformation("Hnadling new message");
+        }
+
+        // Submit a message to the event message queue. Requires the message structure to be prepopulated
+        public async void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "")
+        {
+            try
+            {
+                if (_serviceState != Consts.ServiceState.STOPPED && messQ.Count < 1000)                      // Don't add messages to the message queue if service is stopped, and if it is paused for too long start dropping messages
+                {
+                    var myMessage = new Commons.HAMessage
+                    {
+                        network = Core.networkName,
+                        category = channel.category,
+                        className = channel.className,
+                        instance = channel.instance,
+                        scope = scope,
+                        data = data
+                    };
+
+                    if (messQ.TryAdd(myMessage))
+                    {
+                        await Core.timeSeries.WriteTS(myMessage);                                               // Log to message log
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                //TODO
+                Logger.LogCritical("Can't submit message to message queue. Exiting...");
+                throw;
+            }
         }
 
         // Channels must be created before subscribed to.
@@ -162,6 +176,24 @@ namespace HAServer
             }
             return null;                                                                            // subscription does not exist
         }
+
+        // Control the actions of the main message queue
+        public void SetServerState(Consts.ServiceState setState)
+        {
+            _serviceState = setState;
+        }
+
+        // Show current state of the message queue
+        public Consts.ServiceState GetServerState()
+        {
+            return _serviceState;
+        }
+
+        // Any shutdown code
+        public void Shutdown()
+        {
+        }
+
     }
 }
 

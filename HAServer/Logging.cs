@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console.Internal;
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 // NUGET: Microsoft.Extensions.Logging 1.1.0, ..Logging.Console
@@ -53,9 +54,9 @@ namespace HAServer
 
         public MyLogger(string callerName)
         {
-            _callerName = callerName;
+            _callerName = callerName.Replace("HAServer.", "");
 
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            if (Core.isWindows)
             {
                 Console = new WindowsLogConsole();
             }
@@ -67,66 +68,63 @@ namespace HAServer
 
         public IConsole Console
         {
-            get { return _console; }
-            set
+            get => _console; set
             {
-                if (value == null)
-                {
-                    throw new ArgumentNullException(nameof(value));
-                }
-                _console = value;
+                _console = value ?? throw new ArgumentNullException(nameof(value));
             }
         }
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
-            string level = null;
-            ConsoleColors levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
-            ConsoleColors statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
-            switch (logLevel)
+            lock(Core.consoleLock)
             {
-                case LogLevel.Trace:
-                    levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
-                    statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.DarkGray);
-                    level = "TRACE";
-                    break;
+                string level = null;
+                ConsoleColors levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
+                ConsoleColors statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
+                switch (logLevel)
+                {
+                    case LogLevel.Trace:
+                        levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
+                        statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.DarkGray);
+                        level = "TRACE";
+                        break;
 
-                case LogLevel.Debug:
-                    levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
-                    statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.DarkGray);
-                    level = "DEBUG";
-                    break;
+                    case LogLevel.Debug:
+                        levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Gray);
+                        statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.DarkGray);
+                        level = "DEBUG";
+                        break;
 
-                case LogLevel.Information:
-                    levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Green);
-                    statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.DarkGreen);
-                    level = "INFO";
-                    break;
+                    case LogLevel.Information:
+                        levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Green);
+                        statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.DarkGreen);
+                        level = "INFO";
+                        break;
 
-                case LogLevel.Warning:
-                    levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Yellow);
-                    statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Yellow);
-                    level = "WARNING";
-                    break;
+                    case LogLevel.Warning:
+                        levelColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Yellow);
+                        statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Yellow);
+                        level = "WARNING";
+                        break;
 
-                case LogLevel.Error:
-                    levelColors = new ConsoleColors(ConsoleColor.DarkMagenta, ConsoleColor.White);
-                    statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.White);
-                    level = "ERROR";
-                    break;
+                    case LogLevel.Error:
+                        levelColors = new ConsoleColors(ConsoleColor.DarkMagenta, ConsoleColor.White);
+                        statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.White);
+                        level = "ERROR";
+                        break;
 
-                case LogLevel.Critical:
-                    level = "CRITICAL";
-                    levelColors = new ConsoleColors(ConsoleColor.Red, ConsoleColor.Black);
-                    statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Red);
-                    break;
+                    case LogLevel.Critical:
+                        level = "CRITICAL";
+                        levelColors = new ConsoleColors(ConsoleColor.Red, ConsoleColor.Black);
+                        statusColors = new ConsoleColors(ConsoleColor.Black, ConsoleColor.Red);
+                        break;
+                }
+                Console.Write(String.Format("{0} {1,-14}", DateTime.Now.ToString("HH:mm:ss.fff"), "[" + _callerName + "] "), ConsoleColor.Black, ConsoleColor.Gray);
+                Console.Write(level, levelColors.Foreground, levelColors.Background);
+                Console.Write(" " + state.ToString(), statusColors.Foreground, statusColors.Background);
+                Console.WriteLine("", levelColors.Foreground, levelColors.Background);
+                Console.Flush();
             }
-            Console.Write(String.Format("{0,-12} {1,-10}", DateTime.Now.ToString("HH:mm:ss.fff"), "[" + _callerName + "] "), ConsoleColor.Black, ConsoleColor.Gray);
-            Console.Write("".PadLeft(28 - _callerName.Length - level.Length), ConsoleColor.Black, ConsoleColor.Gray);
-            Console.Write(level, levelColors.Foreground, levelColors.Background);
-            Console.Write(" " + state.ToString(), statusColors.Foreground, statusColors.Background);
-            Console.WriteLine("", levelColors.Foreground, levelColors.Background);
-            Console.Flush();
         }
 
         public bool IsEnabled(LogLevel logLevel)

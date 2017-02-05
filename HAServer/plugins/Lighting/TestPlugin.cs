@@ -2,13 +2,27 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Plugins
+namespace TestPlugin
 {
     public class MyPlugin
     {
-        public void Program(string param)
+        private object _host;
+
+        public string Program(object pubSub)
         {
-            Console.WriteLine($"you said '{param}!'");
+            try
+            {
+                var yy = 0;
+                var tt = 1 / yy;
+                _host = pubSub;
+                Console.WriteLine("In Plugin");
+                return "OK";
+
+            }
+            catch (Exception ex)
+            {
+                return ex.ToString();
+            }
         }
     }
 }

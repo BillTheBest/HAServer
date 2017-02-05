@@ -31,6 +31,14 @@
             SYSTEM = 1                      // Internal category for system messages
         }
 
+        // Define the running state of the HAServer
+        public enum ServiceState : byte
+        {
+            STOPPED = 0,                                        // Not processing Messages and they are not saved on the message queue (all new messages lost)
+            RUNNING = 1,                                        // Processing Messages as they come onto the queue
+            PAUSED = 2                                          // Not processing Messages but they are backed up on the message queue
+        }
+
     }
 
 }

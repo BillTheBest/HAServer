@@ -59,7 +59,11 @@ namespace HAServer
 
                 throw;
             }
+        }
 
+        // Any shutdown code
+        public void Shutdown()
+        {
         }
 
         public class WebServerConfig
@@ -94,9 +98,12 @@ namespace HAServer
 
 
             // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-            public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
+            public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory, IApplicationLifetime appLifetime)
             {
-                //TODO: If debugging
+                // Use ASP.NET shutdown event to close all automation services
+                // NOT WORKING AS APP WON"T PROPERLY EXIT 
+                // appLifetime.ApplicationStopping.Register(() => Core.ShutConsole(Consts.ExitCodes.OK));
+
                 //loggerFactory.AddConsole();
 
                 app.UseResponseCompression();               // Invoke compression for requests (ensure this is before any middleware serving content

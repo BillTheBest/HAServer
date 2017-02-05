@@ -106,6 +106,11 @@ namespace HAServer
                 throw;
             }
         }
+
+        // Any shutdown code
+        public void Shutdown()
+        {
+        }
     }
 
     class NodeJS
@@ -126,7 +131,7 @@ namespace HAServer
             var _nodeProcess = new Process
             {
                 StartInfo =
-                    {
+                {
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
@@ -170,54 +175,75 @@ namespace HAServer
 
         public object Run()
         {
-
-            String codeToCompile = File.ReadAllText(_file.FullName);
-
-            SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(codeToCompile);
-
-            string assemblyName = Path.GetRandomFileName();
-            MetadataReference[] references = new MetadataReference[]
+            try
             {
+                var codeToCompile = File.ReadAllText(_file.FullName);
+                var fileName = Path.GetFileNameWithoutExtension(_file.Name);
+                SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(codeToCompile);
+
+                string assemblyName = Path.GetRandomFileName();
+                MetadataReference[] references = new MetadataReference[]
+                {
                                                     MetadataReference.CreateFromFile(typeof(object).GetTypeInfo().Assembly.Location)
-            };
+                };
 
-            CSharpCompilation compilation = CSharpCompilation.Create(
-                assemblyName,
-                syntaxTrees: new[] { syntaxTree },
-                references: references,
-                options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+                CSharpCompilation compilation = CSharpCompilation.Create(
+                    assemblyName,
+                    syntaxTrees: new[] { syntaxTree },
+                    references: references,
+                    options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-            using (var ms = new MemoryStream())
-            {
-                EmitResult result = compilation.Emit(ms);
-
-                if (!result.Success)
+                using (var ms = new MemoryStream())
                 {
-                    IEnumerable<Diagnostic> failures = result.Diagnostics.Where(diagnostic =>
-                        diagnostic.IsWarningAsError ||
-                        diagnostic.Severity == DiagnosticSeverity.Error);
+                    EmitResult result = compilation.Emit(ms);
 
-                    var diag = "";
-                    foreach (Diagnostic diagnostic in failures)
+                    if (!result.Success)
                     {
-                        diag = diag + String.Format("\t{0}: {1}", diagnostic.Id, diagnostic.GetMessage());
+                        IEnumerable<Diagnostic> failures = result.Diagnostics.Where(diagnostic =>
+                            diagnostic.IsWarningAsError ||
+                            diagnostic.Severity == DiagnosticSeverity.Error);
+
+                        var diag = "";
+                        foreach (Diagnostic diagnostic in failures)
+                        {
+                            diag = diag + String.Format("\t{0}: {1}", diagnostic.Id, diagnostic.GetMessage());
+                        }
+                        Plugins.Logger.LogError("Compilation of plugin " + fileName.ToUpper() + " failed. Error: " + Environment.NewLine + diag);
                     }
-                    Plugins.Logger.LogError("Compilation of plugin " + _file.Name.ToUpper() + " failed. Error: " + Environment.NewLine + diag);
-                }
-                else
-                {
-                    Plugins.Logger.LogInformation("Starting plugin " + _file.Name.ToUpper() + "...");
-                    ms.Seek(0, SeekOrigin.Begin);
+                    else
+                    {
+                        Plugins.Logger.LogInformation("Starting plugin " + _file.Name.ToUpper() + "...");
+                        ms.Seek(0, SeekOrigin.Begin);
 
-                    Assembly assembly = AssemblyLoadContext.Default.LoadFromStream(ms);
-                    _inst = assembly.CreateInstance("Plugins.MyPlugin");
-                    var type = assembly.GetType("Plugins.MyPlugin");
-                    var meth = type.GetMember("Program").First() as MethodInfo;
-                    meth.Invoke(_inst, new[] { "me!" }); // on thread
+                        Assembly assembly = AssemblyLoadContext.Default.LoadFromStream(ms);
+                        _inst = assembly.CreateInstance(fileName + ".MyPlugin");
+                        var type = assembly.GetType(fileName + ".MyPlugin");
+                        var meth = type.GetMember("Program").First() as MethodInfo;
+                        Thread thread = new Thread(delegate ()                                                                  // Run extension on its own thread
+                        {
+                            //var plugStart = (string)extensions[extName].ExtStart(Core.pubSub);                                   // Start with reference to pubsub instance so plugin can contact host.
+                            var plugStart = (string)meth.Invoke(_inst, new[] { "from C# plugin" });
+                            if (plugStart != "OK")
+                            {
+                                Plugins.Logger.LogWarning("Plugin " + fileName.ToUpper() + " started with errors, may not be functional. Error:" + Environment.NewLine + plugStart);
+                                //TODO: Return errors
+                            }
+                            else
+                            {
+                                Plugins.Logger.LogInformation("Plugin " + fileName.ToUpper() + " started with status: " + plugStart);
+                            }
+                        })
+                        { IsBackground = true };
+                        thread.Start();
+                    }
                 }
+                return _inst;
             }
-            return _inst;
-
+            catch (Exception ex)
+            {
+                Plugins.Logger.LogWarning("Cannot run plugin " + _file.Name + ", functionality won't be available. Error:" + Environment.NewLine + ex.ToString());
+                return null;
+            }
         }
     }
 }

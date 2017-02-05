@@ -14,7 +14,7 @@ namespace Interfaces
     {
         bool AddUpdChannel(ChannelKey channel, ChannelSub channelSub, [CallerMemberName] string caller = "");
         string Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
-        bool Publish(string clientName, ChannelKey channel, string message, [CallerFilePath] string caller = "");
+        void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "");
     }
 
     public struct ChannelKey
@@ -46,4 +46,13 @@ namespace Interfaces
 // Get this compiled as dotnet standard 1.6 which is compatible with .net core.
 namespace Commons
 {
+    public class HAMessage
+    {
+        public string network;
+        public string category;
+        public string className;
+        public string instance;
+        public string scope;
+        public string data;
+    }
 }
