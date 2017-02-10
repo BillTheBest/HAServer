@@ -43,7 +43,7 @@ namespace HAServer
 
                 _dbName = dbName;
 
-                //TODO: Kill existying influxd
+                //TODO: Orderly shutdown influxdb
 
                 var _tsProcess = new Process
                 {
@@ -195,12 +195,13 @@ namespace HAServer
             //TODO: kill influxd process
             foreach (Process proc in Process.GetProcesses())
             {
-                if (FileDes == proc.MainModule.ModuleName == "influxd")
-                {
-                    x.Kill();
-                }
-
+                /*          if (FileDes == proc.MainModule.ModuleName == "influxd")
+                          {
+                              x.Kill();
+                          }
+                          */
             }
+        }
 
         // Redundant....
         public class NewPoint

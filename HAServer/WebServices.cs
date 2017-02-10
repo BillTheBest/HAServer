@@ -10,6 +10,7 @@ using System.Net.WebSockets;
 using System.Threading;
 using System.Text;
 using System.Collections.Concurrent;
+using System.IO;
 
 // NOTES: Deebug with the name of the program not IISExpress in the debug play button, this runs .NET ASP in a console so uses Krestrel not IIS
 // Set launchsettings.json to the port you want to launch from, and if you want a browser automatically launched or not, and specify the port in .UseUrls("http://*:80)
@@ -26,28 +27,30 @@ namespace HAServer
     {
         static ILogger Logger { get; } = ApplicationLogging.CreateLogger<WebServices>();
 
-        public WebServices(string filesLoc)
+        public WebServices(string port, string filesLoc)
         {
-            Thread webServer = new Thread(() => WebServices.WebServer(filesLoc)) { IsBackground = true };       // Background threads will end if main thread ends  
+            //TODO: Should this be a Task??
+            Thread webServer = new Thread(() => WebServices.WebServer(port, filesLoc)) { IsBackground = true };       // Background threads will end if main thread ends  
             webServer.Start();
         }
 
         // THREAD: Run the web server
-        public static void WebServer(object webroot)
+        public static void WebServer(string port, string webroot)
         {
             try
             {
-                Logger.LogInformation("Starting WebServer...");
-
+                Logger.LogInformation("Starting WebServer on port " + port + "...");
+                var wwwroot = Path.Combine(Directory.GetCurrentDirectory(), (string)webroot);                       // directory path is relative
+                Directory.CreateDirectory(wwwroot);                              // Create wwwroot directory if not existing                                                            // In case this is a new install
                 var host = new WebHostBuilder()
-                    .UseUrls("http://*:80")
+                    .UseUrls("http://*:" + port)
                     .UseKestrel(opts => opts.ThreadCount = 4)               // Is 4 optimal?
                                                                             //.UseUrls("https://*:443")                                     // sets port to use
                                                                             //.UseKestrel(options => {
                                                                             //    options.UseHttps(new X509Certificate2("filename...", "password"));
                                                                             //})
                                                                             //.UseIISIntegration()
-                    .UseContentRoot((string)webroot)            // Set the default directory for serving files under webroot
+                    .UseContentRoot(wwwroot)            // Set the default directory for serving files under webroot
                     .UseStartup<WebServerConfig>()
                     .Build();
 
@@ -55,8 +58,8 @@ namespace HAServer
             }
             catch (Exception ex)
             {
-                Logger.LogError("WebServer was unable to start." + Environment.NewLine + ex.ToString());
-
+                if (ex.Message.Contains("EACCES")) Logger.LogError("Access error on port - likely there is another webserver already using port " + port);
+                Logger.LogCritical("WebServer was unable to start." + Environment.NewLine + ex.ToString());
                 throw;
             }
         }

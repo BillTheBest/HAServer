@@ -1,1 +1,1 @@
-﻿process.stdout.write('Hello');
+﻿process.stdout.write('From Node plugin');

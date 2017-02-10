@@ -30,10 +30,11 @@ namespace HAServer
         {
             try
             {
-                if (Directory.Exists(locn))
-                {
+//                if (Directory.Exists(locn))
+//                {
                     foreach (var cat in Core.categories)                                                        // recurse through category directories
                     {
+                        Directory.CreateDirectory(Path.Combine(locn, cat.name));                                // In case of new install create dirs
                         DirectoryInfo directory = new DirectoryInfo(Path.Combine(locn, cat.name));
                         FileInfo[] plugFiles = directory.GetFiles("*.cs")                                       // Get C# files
                                                     .Union(directory
@@ -90,19 +91,18 @@ namespace HAServer
                     }
 
 
-                }
-                else
-                {
-                    Logger.LogInformation("No plugins found - creating plugin directories...");
-                    foreach (var cat in Core.categories)
-                    {
-                        Directory.CreateDirectory(Path.Combine(locn, cat.name));
-                    }
-                }
+//                }
+//                else
+//                {
+//                    Logger.LogInformation("No plugins found - creating plugin directories...");
+//                    foreach (var cat in Core.categories)
+//                    {
+//                        Directory.CreateDirectory(Path.Combine(locn, cat.name));
+ //                   }
+ //               }
             }
             catch (Exception)
             {
-
                 throw;
             }
         }
@@ -127,7 +127,7 @@ namespace HAServer
             {
                 if (item.Contains("nodejs") || item.Contains("NODEJS")) nodePath = item;
             }
-
+            //TODO: Should this be child processes for each plugin to save memory?
             var _nodeProcess = new Process
             {
                 StartInfo =

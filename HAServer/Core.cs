@@ -20,17 +20,11 @@ using System.Runtime.InteropServices;
 //TODO: Remove system.composition nuget after testing
 namespace HAServer
 {
-    public struct CatStruc
-    {
-        public string name;
-        public string icon;
-    }
-
     public class Core
     {
         // Globals
         public static string networkName;
-        public static List<CatStruc> categories = new List<CatStruc>();
+        public static List<Consts.CatStruc> categories = new List<Consts.CatStruc>();
         public static bool DebugMode = false;
         public static bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         public static object consoleLock = new object();                                                    // Used to ensure only 1 thread writes to console output
@@ -87,7 +81,7 @@ namespace HAServer
                 {
                     if (cat.Key.ToUpper().Contains("ICON"))
                     {
-                        categories.Add(new CatStruc { name = myCat, icon = cat.Value.ToUpper() });
+                        categories.Add(new Consts.CatStruc { name = myCat, icon = cat.Value.ToUpper() });
                     } else
                     {
                         myCat = cat.Value.ToUpper();
@@ -119,7 +113,7 @@ namespace HAServer
                 plugins = new Plugins(Path.Combine(Directory.GetCurrentDirectory(), plugFilesLoc));
 
                 // Setup web services
-                webServices = new WebServices(svrCfg.GetSection("Server:ClientWebFilesLoc").Value);
+                webServices = new WebServices(svrCfg.GetSection("Server:WebServerPort").Value, svrCfg.GetSection("Server:ClientWebFilesLoc").Value);
             }
             catch (Exception ex)
             {
@@ -135,8 +129,7 @@ namespace HAServer
             ConsoleKey cki = 0;
             while (cki != ConsoleKey.X)
             {
-                cki = Console.ReadKey(true).Key;
-                // Start a console read operation. Do not display the input.
+                cki = Console.ReadKey(true).Key;                                                                // Start a console read operation. Do not display the input.
                 switch (cki)
                 {
                     case ConsoleKey.C:                        // Clear console screen
