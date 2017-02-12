@@ -37,7 +37,7 @@ namespace HAServer
         private static Database sqldb;
         public static TimeSeries timeSeries;
 
-        static ILogger Logger { get; } = ApplicationLogging.CreateLogger<Core>();
+        static ILogger Logger = ApplicationLogging.CreateLogger<Core>();
 
         // Specify a different ini file on the command line for alternate configurations
         public static void Main(string[] args)
@@ -113,7 +113,9 @@ namespace HAServer
                 plugins = new Plugins(Path.Combine(Directory.GetCurrentDirectory(), plugFilesLoc));
 
                 // Setup web services
-                webServices = new WebServices(svrCfg.GetSection("Server:WebServerPort").Value, svrCfg.GetSection("Server:ClientWebFilesLoc").Value);
+                webServices = new WebServices(
+                    svrCfg.GetSection("Web:WebServerPort").Value, 
+                    svrCfg.GetSection("Web:ClientWebFilesLoc").Value);
             }
             catch (Exception ex)
             {

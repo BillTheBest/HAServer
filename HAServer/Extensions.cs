@@ -14,7 +14,7 @@ namespace HAServer
 {
     public class Extensions
     {
-        static ILogger Logger { get; } = ApplicationLogging.CreateLogger<Extensions>();
+        static ILogger Logger = ApplicationLogging.CreateLogger<Extensions>();
 
         // Array of extensions loaded <name, obj>
         private ConcurrentDictionary<String, dynamic> extensions = new ConcurrentDictionary<String, dynamic>();

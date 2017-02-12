@@ -26,7 +26,7 @@ namespace HAServer
 {
     public class TimeSeries
     {
-        static ILogger Logger { get; } = ApplicationLogging.CreateLogger<TimeSeries>();
+        static ILogger Logger = ApplicationLogging.CreateLogger<TimeSeries>();
 
         const TimeUnit timeunit = TimeUnit.Milliseconds;
 

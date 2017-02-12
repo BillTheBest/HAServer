@@ -7,7 +7,7 @@ namespace SampleExtension
     {
         public static string ExtensionRun(string StartParam)
         {
-            Console.WriteLine("in plugin user module - " + StartParam);
+            Console.WriteLine("in extension user module - " + StartParam);
             return "OK";
         }
     }

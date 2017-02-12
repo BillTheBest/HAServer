@@ -11,7 +11,7 @@ namespace HAServer
     // Setup logging for all classes to use
     public static class ApplicationLogging
     {
-        public static ILoggerFactory Logger { get; } = new LoggerFactory();
+        public static ILoggerFactory Logger = new LoggerFactory();
         public static ILogger CreateLogger<T>() =>
         Logger.CreateLogger<T>();
     }

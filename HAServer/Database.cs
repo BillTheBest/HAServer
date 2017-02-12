@@ -9,7 +9,7 @@ namespace HAServer
 {
     public class Database
     {
-        static ILogger Logger { get; } = ApplicationLogging.CreateLogger<Database>();
+        static ILogger Logger = ApplicationLogging.CreateLogger<Database>();
 
         public Database(string dbFileLoc)
         {

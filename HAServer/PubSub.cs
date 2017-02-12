@@ -10,12 +10,13 @@ using System.Threading.Tasks;
 
 //clients are <plugin/extension.clientname>
 //TODO: Persist user group table to file and secure it, modify access via admin UI
+//TODO: Put /// comments on all public external methods
 
 namespace HAServer
 {
     public class PubSub : IPubSub
     {
-        static ILogger Logger { get; } = ApplicationLogging.CreateLogger<PubSub>();
+        static ILogger Logger = ApplicationLogging.CreateLogger<PubSub>();
 
         // Subscription table
         private static ConcurrentDictionary<ChannelKey, ChannelSub> subscriptions = new ConcurrentDictionary<ChannelKey, ChannelSub>();
@@ -91,13 +92,30 @@ namespace HAServer
         }
 
         // THREAD: Handle messages from the message queue
-        public void HandleMessage(Commons.HAMessage myMessage)
+        private void HandleMessage(Commons.HAMessage myMessage)
         {
+            //TODO: If channel info is incomplete then send all children channel (eg. className = CBUS, instance = "" will send all lights messages)
             Logger.LogInformation("Hnadling new message");
         }
 
+        // UNUSED
+        public bool HostFunc(string func, string cat, string className, string instance, string scope, string data)
+        {
+            var myMessage = new Commons.HAMessage
+            {
+                network = Core.networkName,
+                category = cat,
+                className = className,
+                instance = instance,
+                scope = scope,
+                data = data
+            };
+            return true;
+        }
+
         // Submit a message to the event message queue. Requires the message structure to be prepopulated
-        public async void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "")
+        //TODO: Is clientname needed? caller won't be populated by plugins
+        public async void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerMemberName] string caller = "")
         {
             try
             {
@@ -122,7 +140,7 @@ namespace HAServer
             catch (Exception ex)
             {
                 //TODO
-                Logger.LogCritical("Can't submit message to message queue. Exiting...");
+                Logger.LogCritical("Can't submit message to message queue - Exiting. Error: "  + Environment.NewLine + ex.ToString());
                 throw;
             }
         }
@@ -140,7 +158,6 @@ namespace HAServer
         {
             string access = "";
             var fullClientName = Path.GetFileNameWithoutExtension(caller) + "." + clientName;
-
             if (subscriptions.TryGetValue(channel, out var subscription))                           // Get channel subscription info
             {
                 foreach (var subGroup in subscription.auth)                                         // Get access rights for group client is a member of

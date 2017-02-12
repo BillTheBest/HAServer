@@ -10,9 +10,23 @@ namespace Interfaces
         string ExtStop(string param);
     }
 
+    public interface IPlugin
+    {
+        string PlugStart(IPubSub myHost);
+        string PlugStop(string param);
+    }
+
     public interface IPubSub
     {
         bool AddUpdChannel(ChannelKey channel, ChannelSub channelSub, [CallerMemberName] string caller = "");
+
+        /// <summary> 
+        /// Subscribe to a specific channel. 
+        /// 
+        /// A subscription will send any messages in the channel to the instance of the subscriber. 
+        /// </summary> 
+        /// <param name="clientName">The name of the requesting client</param> 
+        /// <param name="channel">The channel to subscribe to (and any children)</param>
         string Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
         void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "");
     }

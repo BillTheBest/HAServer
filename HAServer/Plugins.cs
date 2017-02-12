@@ -21,7 +21,7 @@ namespace HAServer
 {
     public class Plugins
     {
-        public static ILogger Logger { get; } = ApplicationLogging.CreateLogger<Plugins>();
+        public static ILogger Logger = ApplicationLogging.CreateLogger<Plugins>();
 
         // Array of plugins loaded <name, obj>
         private ConcurrentDictionary<String, object> plugins = new ConcurrentDictionary<String, object>();
@@ -30,76 +30,76 @@ namespace HAServer
         {
             try
             {
-//                if (Directory.Exists(locn))
-//                {
-                    foreach (var cat in Core.categories)                                                        // recurse through category directories
+                foreach (var cat in Core.categories)                                                        // recurse through category directories
+                {
+                    Directory.CreateDirectory(Path.Combine(locn, cat.name));                                // In case of new install create dirs
+                    DirectoryInfo directory = new DirectoryInfo(Path.Combine(locn, cat.name));
+                    FileInfo[] plugFiles = directory.GetFiles("*.cs")                                       // Get C# files
+                                                .Union(directory
+                                                .GetFiles("*.js"))                                          // Get node.js files
+                                                .ToArray();
+
+                    if (plugFiles.Length != 0)
                     {
-                        Directory.CreateDirectory(Path.Combine(locn, cat.name));                                // In case of new install create dirs
-                        DirectoryInfo directory = new DirectoryInfo(Path.Combine(locn, cat.name));
-                        FileInfo[] plugFiles = directory.GetFiles("*.cs")                                       // Get C# files
-                                                    .Union(directory
-                                                    .GetFiles("*.js"))                                          // Get node.js files
-                                                    .ToArray();
-
-                        if (plugFiles.Length != 0)
+                        foreach (var plugPath in plugFiles)
                         {
-                            foreach (var plugPath in plugFiles)
+                            var plugName = Path.GetFileNameWithoutExtension(plugPath.Name);
+
+                            // Only load files with accompanying ini
+                            var ini = Path.Combine(locn, cat.name, plugName + ".ini");
+                            if (File.Exists(ini))
                             {
-                                var plugName = Path.GetFileNameWithoutExtension(plugPath.Name);
+                                var plugCfg = new ConfigurationBuilder()
+                                    .AddIniFile(ini, optional: false, reloadOnChange: true)
+                                    .Build();
 
-                                // Only load files with accompanying ini
-                                var ini = Path.Combine(locn, cat.name, plugName + ".ini");
-                                if (File.Exists(ini))
+                                if (plugCfg.GetSection("PluginCfg:Enabled").Value != null && plugCfg.GetSection("PluginCfg:Enabled").Value.ToUpper() == "TRUE")
                                 {
-                                    var plugCfg = new ConfigurationBuilder()
-                                        .AddIniFile(ini, optional: false, reloadOnChange: true)
-                                        .Build();
-
-                                    if (plugCfg.GetSection("PluginCfg:Enabled").Value != null && plugCfg.GetSection("PluginCfg:Enabled").Value.ToUpper() == "TRUE")
+                                    switch (Path.GetExtension(plugPath.Name))
                                     {
-                                        switch (Path.GetExtension(plugPath.Name))
-                                        {
-                                            case ".cs":
-                                                Logger.LogInformation("C# Plugin " + plugName.ToUpper() + " (" + plugCfg.GetSection("PluginCfg:Desc").Value + ") enabled, compiling...");
-                                                var myCSPlug = new CSharp(plugPath);
-                                                plugins[plugName] = myCSPlug;
-                                                myCSPlug.Run();
-                                                break;
+                                        case ".cs":
+                                            Logger.LogInformation("C# Plugin " + plugName.ToUpper() + " (" + plugCfg.GetSection("PluginCfg:Desc").Value + ") enabled, compiling...");
+                                            var myCSPlug = new CSharp(plugPath);
+                                            plugins[plugName] = myCSPlug;
+                                            myCSPlug.Run();
+                                            break;
 
-                                            case ".js":
-                                                Logger.LogInformation("NODE.JS Plugin " + plugName.ToUpper() + " (" + plugCfg.GetSection("PluginCfg:Desc").Value + ") enabled, running...");
-                                                var myJSPlug = new NodeJS(plugPath);
-                                                plugins[plugName] = myJSPlug;
-                                                myJSPlug.Run();
-                                                break;
+                                        case ".js":
+                                            Logger.LogInformation("NODE.JS Plugin " + plugName.ToUpper() + " (" + plugCfg.GetSection("PluginCfg:Desc").Value + ") enabled, running...");
+                                            var myJSPlug = new NodeJS(plugPath);
+                                            plugins[plugName] = myJSPlug;
+                                            myJSPlug.Run();
+                                            break;
 
-                                            default:
-                                                break;
-                                        }
+                                        default:
+                                            break;
                                     }
-                                    else
+                                    foreach (var section in plugCfg.GetChildren())                                                     // Autosubscribe to channels
                                     {
-                                        Logger.LogWarning("Plugin " + plugName.ToUpper() + " enabled in INI file, skipping...");
+                                        if (section.Key.ToUpper().StartsWith("CHANNEL"))
+                                        {
+                                            Core.pubSub.Subscribe(plugName, new Interfaces.ChannelKey
+                                            {
+                                                network = Core.networkName,
+                                                category = cat.name,
+                                                className = plugName,
+                                                instance = plugCfg.GetSection(section.Key + ":Name").Value
+                                            });
+                                        }
                                     }
                                 }
                                 else
                                 {
-                                    Logger.LogWarning("Plugin file " + plugName.ToUpper() + " does not have a INI configuration file, not loaded.");
+                                    Logger.LogWarning("Plugin " + plugName.ToUpper() + " enabled in INI file, skipping...");
                                 }
+                            }
+                            else
+                            {
+                                Logger.LogWarning("Plugin file " + plugName.ToUpper() + " does not have a INI configuration file, not loaded.");
                             }
                         }
                     }
-
-
-//                }
-//                else
-//                {
-//                    Logger.LogInformation("No plugins found - creating plugin directories...");
-//                    foreach (var cat in Core.categories)
-//                    {
-//                        Directory.CreateDirectory(Path.Combine(locn, cat.name));
- //                   }
- //               }
+                }
             }
             catch (Exception)
             {
@@ -110,13 +110,13 @@ namespace HAServer
         // Any shutdown code
         public void Shutdown()
         {
+            //TODO: Close down node threads
         }
     }
 
     class NodeJS
     {
         FileInfo _file;
-        object _inst = null;
         string nodePath = @"C:\Program Files\nodejs";                                      // Default
 
         public NodeJS(FileInfo file)
@@ -145,7 +145,7 @@ namespace HAServer
             _nodeProcess.EnableRaisingEvents = true;
             _nodeProcess.Start();
 
-            _nodeProcess.OutputDataReceived += (object sender, System.Diagnostics.DataReceivedEventArgs e) => 
+            _nodeProcess.OutputDataReceived += (object sender, System.Diagnostics.DataReceivedEventArgs e) =>
                 Console.WriteLine(e.Data);
             _nodeProcess.BeginOutputReadLine();
 
@@ -166,7 +166,7 @@ namespace HAServer
     public class CSharp
     {
         FileInfo _file;
-        object _inst = null;
+        public object inst = null;
 
         public CSharp(FileInfo file)
         {
@@ -182,16 +182,21 @@ namespace HAServer
                 SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(codeToCompile);
 
                 string assemblyName = Path.GetRandomFileName();
+                var assemblyPath = Path.GetDirectoryName(typeof(object).GetTypeInfo().Assembly.Location);                                   //The location of the .NET assemblies
+
                 MetadataReference[] references = new MetadataReference[]
                 {
-                                                    MetadataReference.CreateFromFile(typeof(object).GetTypeInfo().Assembly.Location)
+                    MetadataReference.CreateFromFile(typeof(object).GetTypeInfo().Assembly.Location),
+                    MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "mscorlib.dll")),
+                    MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.Runtime.dll")),
+                    MetadataReference.CreateFromFile(typeof(Commons.HAMessage).GetTypeInfo().Assembly.Location)             // Commons DLL reference 
                 };
 
                 CSharpCompilation compilation = CSharpCompilation.Create(
                     assemblyName,
                     syntaxTrees: new[] { syntaxTree },
                     references: references,
-                    options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+                    options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, optimizationLevel: OptimizationLevel.Release));
 
                 using (var ms = new MemoryStream())
                 {
@@ -206,9 +211,9 @@ namespace HAServer
                         var diag = "";
                         foreach (Diagnostic diagnostic in failures)
                         {
-                            diag = diag + String.Format("\t{0}: {1}", diagnostic.Id, diagnostic.GetMessage());
+                            diag = diag + Environment.NewLine + String.Format("\t{0}: ({1}) {2}", diagnostic.Id, diagnostic.Location.ToString(), diagnostic.GetMessage());
                         }
-                        Plugins.Logger.LogError("Compilation of plugin " + fileName.ToUpper() + " failed. Error: " + Environment.NewLine + diag);
+                        Plugins.Logger.LogError("Compilation of plugin " + fileName.ToUpper() + " failed. Plugin disabled. Error: " + diag);
                     }
                     else
                     {
@@ -216,13 +221,13 @@ namespace HAServer
                         ms.Seek(0, SeekOrigin.Begin);
 
                         Assembly assembly = AssemblyLoadContext.Default.LoadFromStream(ms);
-                        _inst = assembly.CreateInstance(fileName + ".MyPlugin");
+                        inst = Activator.CreateInstance(assembly.GetType(fileName + ".MyPlugin"), new object[] { Core.pubSub });       // Start with reference to pubsub instance so plugin can contact host.
                         var type = assembly.GetType(fileName + ".MyPlugin");
-                        var meth = type.GetMember("Program").First() as MethodInfo;
+                        var meth = type.GetMember("Startup").First() as MethodInfo;
+
                         Thread thread = new Thread(delegate ()                                                                  // Run extension on its own thread
                         {
-                            //var plugStart = (string)extensions[extName].ExtStart(Core.pubSub);                                   // Start with reference to pubsub instance so plugin can contact host.
-                            var plugStart = (string)meth.Invoke(_inst, new[] { "from C# plugin" });
+                            var plugStart = (string)meth.Invoke(inst, new[] {"start"});
                             if (plugStart != "OK")
                             {
                                 Plugins.Logger.LogWarning("Plugin " + fileName.ToUpper() + " started with errors, may not be functional. Error:" + Environment.NewLine + plugStart);
@@ -237,7 +242,7 @@ namespace HAServer
                         thread.Start();
                     }
                 }
-                return _inst;
+                return inst;
             }
             catch (Exception ex)
             {

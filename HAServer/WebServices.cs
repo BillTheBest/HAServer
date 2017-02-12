@@ -15,7 +15,7 @@ using System.IO;
 // NOTES: Deebug with the name of the program not IISExpress in the debug play button, this runs .NET ASP in a console so uses Krestrel not IIS
 // Set launchsettings.json to the port you want to launch from, and if you want a browser automatically launched or not, and specify the port in .UseUrls("http://*:80)
 //TODO: Should this be an extension???
-
+//TODO: Low priority supress console output
 
 // Check this for Core version of https://github.com/vtortola/WebSocketListener/pull/93
 //TODO: Check when Core supports websockets compression
@@ -25,11 +25,10 @@ namespace HAServer
 {
     public class WebServices
     {
-        static ILogger Logger { get; } = ApplicationLogging.CreateLogger<WebServices>();
+        static ILogger Logger = ApplicationLogging.CreateLogger<WebServices>();
 
         public WebServices(string port, string filesLoc)
         {
-            //TODO: Should this be a Task??
             Thread webServer = new Thread(() => WebServices.WebServer(port, filesLoc)) { IsBackground = true };       // Background threads will end if main thread ends  
             webServer.Start();
         }
@@ -41,7 +40,8 @@ namespace HAServer
             {
                 Logger.LogInformation("Starting WebServer on port " + port + "...");
                 var wwwroot = Path.Combine(Directory.GetCurrentDirectory(), (string)webroot);                       // directory path is relative
-                Directory.CreateDirectory(wwwroot);                              // Create wwwroot directory if not existing                                                            // In case this is a new install
+                Directory.CreateDirectory(wwwroot);                              // Create wwwroot directory if not existing
+
                 var host = new WebHostBuilder()
                     .UseUrls("http://*:" + port)
                     .UseKestrel(opts => opts.ThreadCount = 4)               // Is 4 optimal?
@@ -50,7 +50,8 @@ namespace HAServer
                                                                             //    options.UseHttps(new X509Certificate2("filename...", "password"));
                                                                             //})
                                                                             //.UseIISIntegration()
-                    .UseContentRoot(wwwroot)            // Set the default directory for serving files under webroot
+                    .UseWebRoot(wwwroot)                                            // Sets the web server root
+                    //.UseContentRoot(Directory.GetCurrentDirectory())            // Set the default directory for serving files under webroot
                     .UseStartup<WebServerConfig>()
                     .Build();
 
@@ -78,12 +79,7 @@ namespace HAServer
 
             public void ConfigureServices(IServiceCollection services)
             {
-                services.AddResponseCaching(options =>
-
-                {
-                });
-                ;              // setup Response caching
-                               //services.AddMemoryCache();                  // Used to cache data for fast response. Perhaps use this for the statestore????
+                services.AddResponseCaching();                          // setup Response caching
                 services.AddResponseCompression();          // setup compression
                 services.Configure<GzipCompressionProviderOptions>(options =>
                     options.Level = System.IO.Compression.CompressionLevel.Optimal);        // Optimal compresses as much as possible (good for internet transport). Other options are fastest (good for LAN) & no compression.
@@ -107,12 +103,10 @@ namespace HAServer
                 // NOT WORKING AS APP WON"T PROPERLY EXIT 
                 // appLifetime.ApplicationStopping.Register(() => Core.ShutConsole(Consts.ExitCodes.OK));
 
-                //loggerFactory.AddConsole();
-
-                app.UseResponseCompression();               // Invoke compression for requests (ensure this is before any middleware serving content
                 app.UseResponseCaching();                   // Invoke response caching for all requests
+                app.UseResponseCompression();               // Invoke compression for requests (ensure this is before any middleware serving content
 
-                app.UseWebSockets(new WebSocketOptions()
+                app.UseWebSockets(new WebSocketOptions()    // Uses same port as http
                 {
                     ReceiveBufferSize = RECV_BUFF_SIZE,
                     KeepAliveInterval = TimeSpan.FromMinutes(2)
@@ -127,7 +121,6 @@ namespace HAServer
                         while (webSocket != null && webSocket.State == System.Net.WebSockets.WebSocketState.Open)
                         {
                             clients.Add(webSocket);
-
 
                             var buffer = new ArraySegment<byte>(new byte[RECV_BUFF_SIZE]);
                             var charbuffer = new char[RECV_BUFF_SIZE];                            // TODO: Check buffer size for large sends
@@ -171,16 +164,20 @@ namespace HAServer
                         await next();                       // Pass to next middleware
                     }
                 });
-
+                
                 // Setup default start page and serve static files
-                DefaultFilesOptions DefaultFile = new DefaultFilesOptions();
-                DefaultFile.DefaultFileNames.Clear();
-                DefaultFile.DefaultFileNames.Add("myStartPage.html");
-                app.UseDefaultFiles(DefaultFile);
-                long oneYear = 86400000L * 365;
+                //DefaultFilesOptions DefaultFile = new DefaultFilesOptions();
+                //DefaultFile.DefaultFileNames.Clear();
+                //Console.WriteLine(Core.webServices._clientFile);
+                //DefaultFile.DefaultFileNames.Add(Core.webServices._clientFile);
+                //app.UseDefaultFiles(DefaultFile);
 
-                if (env.IsDevelopment())
+                const string oneYear = "public, max-age=" + "31536000000";                        //86400000L * 365L, use as const for performance
+
+                //if (env.IsDevelopment())
+                if (System.Diagnostics.Debugger.IsAttached)
                 {
+                    loggerFactory.AddConsole();
                     //app.UseDeveloperExceptionPage();
                     //app.UseBrowserLink();
                     app.UseStaticFiles(new StaticFileOptions()
@@ -193,31 +190,17 @@ namespace HAServer
                             context.Context.Response.Headers["Expires"] = "-1";
                         }
                     });
-                }
-                else
+                } else
                 {
                     app.UseStaticFiles(new StaticFileOptions()
                     {
                         OnPrepareResponse = (context) =>
                         {
-                            context.Context.Response.Headers["Cache-Control"] = "public, max-age=" + oneYear.ToString();    // Long cache duration for proxy servers and clients
+                            context.Context.Response.Headers["Cache-Control"] = oneYear;    // Long cache duration for proxy servers and clients
                         }
                     });
 
                 }
-
-                // A Middleware component inserted into the run pipeline
-                //app.Use(async (context, next) =>
-                //{
-                //    await context.Response.WriteAsync("PreProcessing");
-                //    await next();                                               // process next middleware, in this case nothing left so RUN is used.
-                //    await context.Response.WriteAsync("PostProcessing");
-                //});
-                // This is the default handler that is run for all requests and terminates all subsequent middleware (app.run terminates, app.use diasychains)
-                //app.Run(async (context) =>
-                //{
-                //    await context.Response.WriteAsync("Hello World!");
-                //});
             }
 
             // Send text out websocket
