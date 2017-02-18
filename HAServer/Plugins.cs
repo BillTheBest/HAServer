@@ -1,4 +1,5 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using Interfaces;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Emit;
 using Microsoft.Extensions.Configuration;
@@ -74,17 +75,50 @@ namespace HAServer
                                         default:
                                             break;
                                     }
-                                    foreach (var section in plugCfg.GetChildren())                                                     // Autosubscribe to channels
+
+                                    // Autosubscribe to channels
+                                    foreach (var section in plugCfg.GetChildren())
                                     {
                                         if (section.Key.ToUpper().StartsWith("CHANNEL"))
                                         {
-                                            Core.pubSub.Subscribe(plugName, new Interfaces.ChannelKey
+                                            var plugCh = new ChannelKey
                                             {
                                                 network = Core.networkName,
                                                 category = cat.name,
                                                 className = plugName,
                                                 instance = plugCfg.GetSection(section.Key + ":Name").Value
+                                            };
+
+                                            // Add new channel with access
+                                            Core.pubSub.AddUpdChannel(plugCh, new ChannelSub
+                                            {
+                                                desc = plugCfg.GetSection(section.Key + ":Desc").Value,
+                                                type = plugCfg.GetSection(section.Key + ":Type").Value,
+                                                io = plugCfg.GetSection(section.Key + ":IO").Value,
+                                                min = plugCfg.GetSection(section.Key + ":Min").Value,
+                                                max = plugCfg.GetSection(section.Key + ":Max").Value,
+                                                units = plugCfg.GetSection(section.Key + ":Units").Value,
+                                                source = "PLUGIN",
+                                                auth = new List<AccessAttribs>
+                                                {
+                                                    new AccessAttribs
+                                                    {
+                                                        name = "ADMINS",
+                                                        access = "RW"
+                                                    }
+                                                },
+                                                clients = new List<AccessAttribs>
+                                                {
+                                                    new AccessAttribs
+                                                    {
+                                                        name = cat.name + "." + plugName,
+                                                        access = "RW"
+                                                    }
+                                                }
                                             });
+
+                                            // All plugins have RW access to their channels (cat/classname) and only R access to other channels
+                                            Core.pubSub.Subscribe(plugName, plugCh);
                                         }
                                     }
                                 }
@@ -117,11 +151,13 @@ namespace HAServer
     class NodeJS
     {
         FileInfo _file;
-        string nodePath = @"C:\Program Files\nodejs";                                      // Default
 
         public NodeJS(FileInfo file)
         {
             _file = file;
+
+            string nodePath = @"C:\Program Files\nodejs";
+            //var nodePath = (Core.isWindows) : @"C:\Program Files\nodejs" ?? @"LINUX PATH";         // TODO
 
             foreach (var item in Environment.GetEnvironmentVariable("path").Split(';'))                 // Find nodejs.exe via path
             {
@@ -217,12 +253,12 @@ namespace HAServer
                     }
                     else
                     {
-                        Plugins.Logger.LogInformation("Starting plugin " + _file.Name.ToUpper() + "...");
+                        //Plugins.Logger.LogInformation("Starting C# plugin " + _file.Name.ToUpper() + "...");
                         ms.Seek(0, SeekOrigin.Begin);
 
                         Assembly assembly = AssemblyLoadContext.Default.LoadFromStream(ms);
-                        inst = Activator.CreateInstance(assembly.GetType(fileName + ".MyPlugin"), new object[] { Core.pubSub });       // Start with reference to pubsub instance so plugin can contact host.
                         var type = assembly.GetType(fileName + ".MyPlugin");
+                        inst = Activator.CreateInstance(type, new object[] { Core.pubSub });       // Start with reference to pubsub instance so plugin can contact host.
                         var meth = type.GetMember("Startup").First() as MethodInfo;
 
                         Thread thread = new Thread(delegate ()                                                                  // Run extension on its own thread
@@ -230,12 +266,12 @@ namespace HAServer
                             var plugStart = (string)meth.Invoke(inst, new[] {"start"});
                             if (plugStart != "OK")
                             {
-                                Plugins.Logger.LogWarning("Plugin " + fileName.ToUpper() + " started with errors, may not be functional. Error:" + Environment.NewLine + plugStart);
+                                Plugins.Logger.LogWarning("C# Plugin " + fileName.ToUpper() + " started with errors, may not be functional. Error:" + Environment.NewLine + plugStart);
                                 //TODO: Return errors
                             }
                             else
                             {
-                                Plugins.Logger.LogInformation("Plugin " + fileName.ToUpper() + " started with status: " + plugStart);
+                                Plugins.Logger.LogInformation("C# Plugin " + fileName.ToUpper() + " started with status: " + plugStart);
                             }
                         })
                         { IsBackground = true };

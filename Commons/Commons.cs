@@ -48,8 +48,13 @@ namespace Interfaces
     public class ChannelSub
     {
         public bool active = true;
+        public string source = "";
         public string desc = "";
-        public string type = "GENERIC";
+        public string type = "";
+        public string io = "";
+        public string min = "0";
+        public string max = "100";
+        public string units = "";
         public string author = "";
         public List<AccessAttribs> clients = new List<AccessAttribs>();                                         // List of clients subscribed & their access rights. This is set when subscribing to enable fast lookup when processing messages
         public List<AccessAttribs> auth = new List<AccessAttribs>();                                            // When subscribing, clients must be a member of one of these groups & will get the access rights of that group

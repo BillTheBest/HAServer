@@ -114,8 +114,9 @@ namespace HAServer
         }
 
         // Submit a message to the event message queue. Requires the message structure to be prepopulated
-        //TODO: Is clientname needed? caller won't be populated by plugins
-        public async void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerMemberName] string caller = "")
+        //TODO: Is clientname needed? caller won't be populated by plugins. Also publish for plugins should be restricted to cat/classname. Need to do this via reflection, but how expensive?
+        //public async void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerMemberName] string caller = "")
+        public async void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "")
         {
             try
             {

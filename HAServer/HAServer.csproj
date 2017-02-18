@@ -9,13 +9,9 @@
     <None Remove="wwwroot\**" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Remove="plugins\LIGHTING\TestPlugin.cs" />
-  </ItemGroup>
-  <ItemGroup>
     <None Remove="influxdb.conf" />
     <None Remove="plugins\LIGHTING\testJS.ini" />
     <None Remove="plugins\LIGHTING\testJS.js" />
-    <None Remove="plugins\LIGHTING\TestPlugin.ini" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="InfluxDB.Net.Core" Version="1.1.22-beta" />
@@ -37,8 +33,5 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Commons\Commons.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="plugins\LIGHTING\" />
   </ItemGroup>
 </Project>

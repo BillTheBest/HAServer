@@ -7,10 +7,13 @@ namespace TestPlugin
     public class MyPlugin
     {
         private IPubSub _host;
+        private ChannelKey _channel = new ChannelKey();
 
         public MyPlugin(IPubSub pubSub)
         {
             _host = pubSub;
+            _channel.category = "LIGHTING";         // TODO get directory name Or maybe use reflection?
+            _channel.className = "Testplugin";      // TODO get file or namespace name
         }
 
         // Runs at startup
@@ -20,12 +23,10 @@ namespace TestPlugin
             {
                 var yy = 0;
                 //var tt = 1 / yy;
-                _host.Publish("MyPlugin", new ChannelKey()
-                {        // TODO: Maybe use callername instead of hard coding plugin name
-                        category = "dd",
-                        className = "ss",
-                        instance = "ww"
-                }, "value", "100");
+
+                // TODO: Maybe use callername instead of hard coding plugin name
+                _channel.instance = "Cocoon";
+                _host.Publish("MyPlugin", _channel, "value", "100");
                 return "OK";
             }
             catch (Exception ex)
