@@ -1,13 +1,15 @@
-﻿using System.Collections.Generic;
+﻿using Commons;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
-//TODO: Remove NetStandard.library from NuGet as it is redundant (it is automatically included in 1.1)
+// Definitions to be shared across main application, extensions and plugins
+//TODO: Consider using simpler interfaces and inheriting these to make more complex ones
 namespace Interfaces
 {
     public interface IExtension
     {
-        string ExtStart(IPubSub myHost);
-        string ExtStop(string param);
+        string Start();
+        string Stop();
     }
 
     public interface IPlugin
@@ -27,9 +29,16 @@ namespace Interfaces
         /// </summary> 
         /// <param name="clientName">The name of the requesting client</param> 
         /// <param name="channel">The channel to subscribe to (and any children)</param>
-        string Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
+        int Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
+
         void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "");
+
+        string GetIniSection(string section, [CallerFilePath] string caller = "");
+
+        bool WriteLog(Commons.LOGTYPES type, string desc, [CallerFilePath] string caller = "");
     }
+
+    //////////// Classes / Structs
 
     public struct ChannelKey
     {
@@ -62,9 +71,26 @@ namespace Interfaces
     }
 }
 
-// Get this compiled as dotnet standard 1.6 which is compatible with .net core.
+// TODO: Get this compiled as dotnet standard 1.6 which is compatible with .net core.
 namespace Commons
 {
+    public class Globals
+    {
+        public static string networkName;
+        public static List<CatStruc> categories = new List<CatStruc>();
+
+        public Globals()
+        {
+        }
+    }
+
+    // Associate icon with category
+    public struct CatStruc
+    {
+        public string name;
+        public string icon;
+    }
+
     public class HAMessage
     {
         public string network;
@@ -73,5 +99,12 @@ namespace Commons
         public string instance;
         public string scope;
         public string data;
+    }
+
+    public enum LOGTYPES
+    {
+        INFORMATION,
+        WARNING,
+        ERROR
     }
 }

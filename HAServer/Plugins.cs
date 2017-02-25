@@ -1,4 +1,5 @@
 ﻿using Interfaces;
+using Commons;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Emit;
@@ -18,6 +19,8 @@ using System.Threading;
 // NUGET: Microsoft.CodeAnalysis.CSharp.Scripting for 1 line scripting. Remove package if not using https://github.com/dotnet/roslyn/wiki/Scripting-API-Samples#assembly 
 // NUGET: Microsoft.CodeAnalysis.CSharp 
 
+    //TODO: Potentially make this an extension for each plugin type (eg. node, c#, python etc). These then interact with the messaging system via pub/sub
+
 namespace HAServer
 {
     public class Plugins
@@ -31,7 +34,7 @@ namespace HAServer
         {
             try
             {
-                foreach (var cat in Core.categories)                                                        // recurse through category directories
+                foreach (var cat in Globals.categories)                                                        // recurse through category directories
                 {
                     Directory.CreateDirectory(Path.Combine(locn, cat.name));                                // In case of new install create dirs
                     DirectoryInfo directory = new DirectoryInfo(Path.Combine(locn, cat.name));
@@ -83,7 +86,7 @@ namespace HAServer
                                         {
                                             var plugCh = new ChannelKey
                                             {
-                                                network = Core.networkName,
+                                                network = Globals.networkName,
                                                 category = cat.name,
                                                 className = plugName,
                                                 instance = plugCfg.GetSection(section.Key + ":Name").Value

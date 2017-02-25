@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Commons;
 
 // To run from the command line, type 'dotnet run' from the directory with the main project files.
 // Camel case for variables, Pascal case for methods
@@ -23,18 +24,17 @@ namespace HAServer
     public class Core
     {
         // Globals
-        public static string networkName;
-        public static List<Consts.CatStruc> categories = new List<Consts.CatStruc>();
         public static bool DebugMode = false;
         public static bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         public static object consoleLock = new object();                                                    // Used to ensure only 1 thread writes to console output
+        public static IConfigurationRoot svrCfg;
 
         // Core modules
         public static PubSub pubSub;
-        private static Extensions extensions;
+        public static Extensions extensions;
         private static Plugins plugins;
         private static WebServices webServices;
-        private static Database sqldb;
+        //private static Database sqldb;
         public static TimeSeries timeSeries;
 
         static ILogger Logger = ApplicationLogging.CreateLogger<Core>();
@@ -42,7 +42,6 @@ namespace HAServer
         // Specify a different ini file on the command line for alternate configurations
         public static void Main(string[] args)
         {
-            IConfigurationRoot svrCfg;
             try
             {
                 // Setup logging
@@ -74,14 +73,15 @@ namespace HAServer
                     .Build();
 
                 // Setup globals
-                networkName = svrCfg.GetSection("Server:NetworkName").Value;
-                if (networkName == null) networkName = "My Home";
+
+                Globals.networkName = svrCfg.GetSection("Server:NetworkName").Value;
+                if (Globals.networkName == null) Globals.networkName = "My Home";
                 string myCat = null;
                 foreach (var cat in svrCfg.GetSection("Categories").GetChildren())
                 {
                     if (cat.Key.ToUpper().Contains("ICON"))
                     {
-                        categories.Add(new Consts.CatStruc { name = myCat, icon = cat.Value.ToUpper() });
+                        Globals.categories.Add(new CatStruc { name = myCat, icon = cat.Value.ToUpper() });
                     } else
                     {
                         myCat = cat.Value.ToUpper();
@@ -92,7 +92,7 @@ namespace HAServer
                 pubSub = new PubSub();
 
                 //SQLite
-                sqldb = new Database(svrCfg.GetSection("Database:FilesLoc").Value);
+                //sqldb = new Database(svrCfg.GetSection("Database:FilesLoc").Value);
 
                 // influxdb
                 timeSeries = new TimeSeries(
@@ -152,7 +152,7 @@ namespace HAServer
         // Finalise anything critical before ending. Called by ASP.NET
         public static Action Cleanup()
         {
-            if (sqldb != null) sqldb.Shutdown();
+            //if (sqldb != null) sqldb.Shutdown();
             if (extensions != null) extensions.Shutdown();
             if (plugins != null) plugins.Shutdown();
             if (pubSub != null) pubSub.Shutdown();

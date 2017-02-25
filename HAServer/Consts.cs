@@ -1,5 +1,6 @@
 ﻿namespace HAServer
 {
+    // Constants for the main application
     public static class Consts
     {
         // Console error codes (passed to the command line when exiting)
@@ -7,13 +8,6 @@
         {
             OK = 0,                                             // Normal exit code
             ERR = 1                                             // Fatal error exit code
-        }
-
-        // Associate icon with category
-        public struct CatStruc
-        {
-            public string name;
-            public string icon;
         }
 
         // Define the running state of the HAServer

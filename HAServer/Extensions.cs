@@ -10,6 +10,8 @@ using Interfaces;
 
 // NUGET: SYstem.Runtime.Loader
 
+// Extensions have their own section in HAServer.ini that they can retrieve but not write to.
+
 namespace HAServer
 {
     public class Extensions
@@ -18,9 +20,11 @@ namespace HAServer
 
         // Array of extensions loaded <name, obj>
         private ConcurrentDictionary<String, dynamic> extensions = new ConcurrentDictionary<String, dynamic>();
+        public ConcurrentDictionary<String, IConfigurationRoot> extInis = new ConcurrentDictionary<string, IConfigurationRoot>();
 
         public Extensions(string locn)
         {
+            string extName = "";
             try
             {
                 if (Directory.Exists(locn))
@@ -33,7 +37,7 @@ namespace HAServer
                     {
                         foreach (var assemblyPath in extFiles)
                         {
-                            var extName = Path.GetFileNameWithoutExtension(assemblyPath);
+                            extName = Path.GetFileNameWithoutExtension(assemblyPath);
 
                             // Only load files with accompanying ini
                             if (File.Exists(locn + Path.DirectorySeparatorChar + extName + ".ini"))
@@ -46,28 +50,18 @@ namespace HAServer
                                 {
                                     Logger.LogInformation("Extension " + extName.ToUpper() + " (" + extCfg.GetSection("ExtensionCfg:Desc").Value + ") enabled, loading...");
                                     var myAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
-                                    //var tt = myAssembly.GetTypes();             ////////// TEST
-
-                                    extensions[extName] = Activator.CreateInstance(myAssembly.GetType(extName + ".FW")) as IExtension;
-
-                                    if (myAssembly.GetType(extName + ".FW") != null)
+                                    var extType = myAssembly.GetType(extName + "." + extName);          
+                                    if (extType != null)
                                     {
-                                        Thread thread = new Thread(delegate ()                                                                  // Run extension on its own thread
-                                        {
-                                            var extStart = (string)extensions[extName].ExtStart(Core.pubSub);                                   // Start with reference to pubsub instance so plugin can contact host.
-                                            if (extStart != "OK")
-                                            {
-                                                Logger.LogError("Extension " + extName.ToUpper() + " started with errors, may not be functional" + Environment.NewLine + extStart);
-                                            }
-                                            else
-                                            {
-                                                Logger.LogInformation("Extension " + extName.ToUpper() + " started with status: " + extStart);
-                                            }
-                                        })
-                                        { IsBackground = true };
-                                        thread.Start();
+                                        extensions[extName.ToUpper()] = Activator.CreateInstance(extType, Core.pubSub) as IExtension;
+                                        extInis[extName.ToUpper()] = extCfg;
+
+                                        Thread thread = new Thread(StartExt);                           // Start on own thread
+                                        thread.IsBackground = true;
+                                        thread.Start(extName.ToUpper());
                                     } else
                                     {
+                                        extensions[extName.ToUpper()] = null;
                                         Logger.LogWarning("Extension " + extName.ToUpper() + " not compiled with correct interface IExtension, skipping...");
                                     }
                                 }
@@ -86,7 +80,7 @@ namespace HAServer
             }
             catch (Exception ex)
             {
-                Logger.LogError("Can't load extension, extension function won't be useable. " + Environment.NewLine + ex.ToString());
+                Logger.LogError("Can't load extension " + extName.ToUpper() + ", extension function won't be useable. " + Environment.NewLine + ex.ToString());
                 if (ex is System.Reflection.ReflectionTypeLoadException)
                 {
                     var typeLoadException = ex as ReflectionTypeLoadException;
@@ -96,7 +90,29 @@ namespace HAServer
 
                 throw ex;
             }
+        }
 
+        public bool RouteMessage(string client, Commons.HAMessage myMessage)
+        {
+            //var tt = 
+            return true;
+        }
+
+        private void StartExt(object extName)
+        {
+            try
+            {
+                var extStart = (string)extensions[(string)extName].Start();                                   // Start with reference to pubsub instance so plugin can contact host.
+                if (extStart != "OK") throw new System.MethodAccessException("Extension " + extName + "failed to start correctly, returned error: " + Environment.NewLine + extStart);
+                else
+                {
+                    Logger.LogInformation("Extension " + extName.ToString() + " started.");
+                }
+            }
+            catch (Exception)
+            {
+                Logger.LogError("Extension " + extName.ToString() + " started with errors, may not be functional");
+            }
         }
 
         // Any shutdown code

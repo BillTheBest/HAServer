@@ -1,12 +1,19 @@
 ﻿using System;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
+
 
 // NUGET: Microsoft.Data.Sqlite
 // http://www.bricelam.net/2015/04/29/sqlite-on-corefx.html
+// NUGET: Microsoft.EntityFrameworkCore.Sqlite
+
+    // NOT USED
 
 namespace HAServer
 {
+
     public class Database
     {
         static ILogger Logger = ApplicationLogging.CreateLogger<Database>();
@@ -15,7 +22,7 @@ namespace HAServer
         {
             try
             {
-                Database.Logger.LogInformation("Starting Automation database...");
+                Logger.LogInformation("Starting Automation database...");
                 return; ////
                 var dbName = "test";
                 var dbBuild = new SqliteConnectionStringBuilder("Data Source=" + dbFileLoc + dbName + ".db");
