@@ -12,6 +12,11 @@ using System.IO;
 using System.Text;
 
 // For automatic building when changed, add the extension to the build dependencies in the solution. Then any changes to the extension source will be built before HAServer
+// Set to compile with Core Framework 1.1
+// Namespace same name as plugin file name including capitalisation
+// post build command: copy SampleExtension.dll ..\..\..\..\HAServer\Extensions
+// Place ini file in the extensions directory of HAServer (not copied with build)
+// Look to compile this as .NET core not Standard.
 
 namespace Rules
 {
@@ -32,21 +37,18 @@ namespace Rules
 
 
         // Open events database
-        //public string ExtStart(IPubSub myHost)
         public string Start()
         {
-            //TODO: Change these to myHost.GetIni...
-
             dbName = _host.GetIniSection("ExtensionCfg:DBName");
             dbLoc = _host.GetIniSection("ExtensionCfg:DBLoc");
 
             // Subscribe to all messages (but only in this network)
-            _host.Subscribe("rules", new ChannelKey
+            _host.Subscribe("Rules", new ChannelKey
             {
                 network = Globals.networkName,
-                category = "LIGHTING",
-                className = "CBUS",
-                instance = "MASTERCOCOON"
+                category = "",
+                className = "",
+                instance = ""
             });
 
             using (var eventsDB = new RulesDB())
@@ -71,6 +73,14 @@ namespace Rules
 
             return "OK";
 
+        }
+
+        // Handle messages subscribed to
+        // TODO: on own thread? Add to interface?
+        public object NewMsg(string route, HAMessage message)
+        {
+            _host.WriteLog(LOGTYPES.INFORMATION, "Got message " + message.instance.ToString());
+            return null;
         }
 
         public string Stop()

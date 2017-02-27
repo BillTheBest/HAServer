@@ -14,6 +14,7 @@ using System.Linq;
 //TODO: Persist user group table to file and secure it, modify access via admin UI
 //TODO: Put /// comments on all public external methods
 
+// These classes handle the message processing based on publish / subscribe channel setup
 namespace HAServer
 {
     public class PubSub : IPubSub
@@ -45,17 +46,19 @@ namespace HAServer
         {
             try
             {
-                Task.Factory.StartNew(() =>                                                                 // Manage messages on the queue
+                Task.Factory.StartNew(() =>                                                                 // Manage messages on the queue via separate thread
                 {
                     var channelKey = new ChannelKey();
                     foreach (Commons.HAMessage HAMessage in messQ.GetConsumingEnumerable())
                     {
                         while (_serviceState != Consts.ServiceState.RUNNING) Thread.Sleep(10);              // If the service has stopped or paused, block don't process the message queue
+
+                        // Log to timeseries
+
                         channelKey.network = HAMessage.network;
                         channelKey.category = HAMessage.category;
                         channelKey.className = HAMessage.className;
                         channelKey.instance = HAMessage.instance;
-
                         if (channels.ContainsKey(channelKey))
                         {
                             var clients = channels[channelKey].clients;                                         // Get subscribing clients
@@ -69,17 +72,17 @@ namespace HAServer
                                 }
                             }
                         }
-
-                        //  Task.Factory.StartNew(() => HandleMessage(HAMessage));                              // Start message consumer tasks
-
                         if (Core.DebugMode) Logger.LogDebug(String.Format("Category: {0}, Class: {1}, Instance: {2}, Scope: {3}, Data: {4}", HAMessage.category, HAMessage.className, HAMessage.instance, HAMessage.scope, HAMessage.data));
                     }
                 }, TaskCreationOptions.LongRunning);
 
                 _serviceState = Consts.ServiceState.PAUSED;                                                 // Accept messages but wait for all the services to start before processing
 
+                // Setup access groups
+                clientGroups["EXTENSIONS"] = new List<string>();
+
+
                 // Test
-                List<string> users = new List<string>();
                 clientGroups["ADMINS"] = new List<string> { "PubSub.myClient" };
 
                 AddUpdChannel(new ChannelKey
@@ -99,7 +102,7 @@ namespace HAServer
                     },
                     new AccessAttribs
                     {
-                        name = "Rules.rules",
+                        name = "EXTENSIONS",
                         access = "RW"
                     }
                 }
@@ -119,6 +122,11 @@ namespace HAServer
                     {
                         name = "ADMINS",
                         access = "RW"
+                    },
+                    new AccessAttribs
+                    {
+                        name = "EXTENSIONS",
+                        access = "RW"
                     }
                 }
                 });
@@ -128,28 +136,6 @@ namespace HAServer
 
                 throw ex;
             }
-        }
-
-        // THREAD: Handle messages from the message queue
-        private void HandleMessage(Commons.HAMessage myMessage)
-        {
-            //TODO: If channel info is incomplete then send all children channel (eg. className = CBUS, instance = "" will send all lights messages)
-            Logger.LogInformation("Hnadling new message");
-        }
-
-        // UNUSED
-        public bool HostFunc(string func, string cat, string className, string instance, string scope, string data)
-        {
-            var myMessage = new Commons.HAMessage
-            {
-                network = Globals.networkName,
-                category = cat,
-                className = className,
-                instance = instance,
-                scope = scope,
-                data = data
-            };
-            return true;
         }
 
         // Submit a message to the event message queue. Requires the message structure to be prepopulated
@@ -222,7 +208,8 @@ namespace HAServer
             if (channel.className != "") subKeys = subKeys.Where(x => x.className == channel.className).ToList();
             if (channel.instance != "") subKeys = subKeys.Where(x => x.instance == channel.instance).ToList();
 
-            foreach(var subKey in subKeys)                                                              // Loop through all channels that match subscription request
+            // Check the auth table for group access and if the subscribing entity is part of a group in the auth table.
+            foreach (var subKey in subKeys)                                                              // Loop through all channels that match subscription request
             {
                 clientAccess = "";
                 var subscription = channels[subKey];
@@ -238,6 +225,7 @@ namespace HAServer
                     }
                 }
 
+                // Setup specific access for the subscribing entity from the group lookup into the subscription clients table for faster message processing
                 if (clientAccess != "")                                                                   // Some access allowed so setup
                 {
                     var newAccess = new AccessAttribs
@@ -263,7 +251,7 @@ namespace HAServer
         // Get values from extension ini file
         public string GetIniSection(string section, [CallerFilePath] string caller = "")
         {
-            var extName = Path.GetFileNameWithoutExtension(caller.ToUpper());
+            var extName = Path.GetFileNameWithoutExtension(caller);
             if (caller == "" || !Core.extensions.extInis.Keys.Contains(extName)) return null;        // Check if asking for the right extension
             return Core.extensions.extInis[extName].GetSection(section).Value;
         }
@@ -284,6 +272,13 @@ namespace HAServer
         public Consts.ServiceState GetServerState()
         {
             return _serviceState;
+        }
+
+        //Add a user to an access group
+        public bool AddUserToAccessGroup(string group, string user)
+        {
+            clientGroups[group].Add(user);
+            return true;
         }
 
         // Any shutdown code

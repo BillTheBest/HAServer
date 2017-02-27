@@ -13,7 +13,7 @@ namespace TestPlugin
         {
             _host = pubSub;
             _channel.category = "LIGHTING";         // TODO get directory name Or maybe use reflection?
-            _channel.className = "Testplugin";      // TODO get file or namespace name
+            _channel.className = "CBUS";      // TODO get file or namespace name
         }
 
         // Runs at startup
@@ -25,8 +25,9 @@ namespace TestPlugin
                 //var tt = 1 / yy;
 
                 // TODO: Maybe use callername instead of hard coding plugin name
-                _channel.instance = "Cocoon";
-                _host.Publish("MyPlugin", _channel, "value", "100");
+                _channel.instance = "JulieWIR";
+                _host.Publish("TestPlugin", _channel, "value", "100", "Plugins");
+                _host.WriteLog(LOGTYPES.INFORMATION, "From Test plugin");
                 return "OK";
             }
             catch (Exception ex)
@@ -41,12 +42,12 @@ namespace TestPlugin
             return "OK";
         }
 
-        public string FromHost(string func, HAMessage channel)
+        public string NewMsg(HAMessage message)
         {   
-            switch (func.ToUpper())
+            switch (message.scope.ToUpper())
             {
                 case "INI":
-                    Console.WriteLine(channel.className);
+                    Console.WriteLine("test ini");
                     break;
                 case "VALUE":
                     break;

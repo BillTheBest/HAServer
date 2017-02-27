@@ -16,6 +16,7 @@ using System.Threading;
 
 // TODO: Edit influxdb.conf file for new data locations. 
 //TODO: Multithreaded
+//TODO: COnsider making this a plugin (then how does history work?)
 // NUGET: InfluxDB.NET.Core (1.1.22-beta)
 // Set the retention property for the data - default is infinite. Look at some form of archiving each year and automatic shift of data to archive. Maybe a db instance per year, prior years will be mostly unused except for all time calcs
 // Use tags for the topic structure network, class, instance but not scope & dat whihc are fields

@@ -48,31 +48,32 @@ namespace HAServer
 
                                 if (extCfg.GetSection("ExtensionCfg:Enabled").Value != null && extCfg.GetSection("ExtensionCfg:Enabled").Value.ToUpper() == "TRUE")
                                 {
-                                    Logger.LogInformation("Extension " + extName.ToUpper() + " (" + extCfg.GetSection("ExtensionCfg:Desc").Value + ") enabled, loading...");
+                                    Logger.LogInformation("Extension " + extName + " (" + extCfg.GetSection("ExtensionCfg:Desc").Value + ") enabled, loading...");
+                                    Core.pubSub.AddUserToAccessGroup("EXTENSIONS", extName + "." + extName);                                // Add to EXTENSIONS access group for pubsub
                                     var myAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
                                     var extType = myAssembly.GetType(extName + "." + extName);          
                                     if (extType != null)
                                     {
-                                        extensions[extName.ToUpper()] = Activator.CreateInstance(extType, Core.pubSub) as IExtension;
-                                        extInis[extName.ToUpper()] = extCfg;
+                                        extensions[extName] = Activator.CreateInstance(extType, Core.pubSub) as IExtension;
+                                        extInis[extName] = extCfg;
 
                                         Thread thread = new Thread(StartExt);                           // Start on own thread
                                         thread.IsBackground = true;
-                                        thread.Start(extName.ToUpper());
+                                        thread.Start(extName);
                                     } else
                                     {
-                                        extensions[extName.ToUpper()] = null;
-                                        Logger.LogWarning("Extension " + extName.ToUpper() + " not compiled with correct interface IExtension, skipping...");
+                                        extensions[extName] = null;
+                                        Logger.LogWarning("Extension " + extName + " not compiled with correct interface IExtension, skipping...");
                                     }
                                 }
                                 else
                                 {
-                                    Logger.LogWarning("Extension " + extName.ToUpper() + " configuration not enabled, skipping...");
+                                    Logger.LogWarning("Extension " + extName + " configuration not enabled, skipping...");
                                 }
                             }
                             else
                             {
-                                if (extName.ToUpper() != "COMMONS") Logger.LogWarning("Extension file " + extName.ToUpper() + " does not have a INI configuration file, not loaded.");
+                                if (extName != "COMMONS") Logger.LogWarning("Extension file " + extName + " does not have a INI configuration file, not loaded.");
                             }
                         }
                     }
@@ -80,7 +81,7 @@ namespace HAServer
             }
             catch (Exception ex)
             {
-                Logger.LogError("Can't load extension " + extName.ToUpper() + ", extension function won't be useable. " + Environment.NewLine + ex.ToString());
+                Logger.LogError("Can't load extension " + extName + ", extension function won't be useable. " + Environment.NewLine + ex.ToString());
                 if (ex is System.Reflection.ReflectionTypeLoadException)
                 {
                     var typeLoadException = ex as ReflectionTypeLoadException;
@@ -92,9 +93,11 @@ namespace HAServer
             }
         }
 
+        // Called from PubSub message processor for extensions subscriptions matching processed message
         public bool RouteMessage(string client, Commons.HAMessage myMessage)
         {
-            //var tt = 
+            var clientRoute = client.Split('.');
+            var extMess = extensions[clientRoute[0]].NewMsg(clientRoute[1], myMessage);                       // Call relevant extension via client route
             return true;
         }
 
@@ -102,16 +105,16 @@ namespace HAServer
         {
             try
             {
-                var extStart = (string)extensions[(string)extName].Start();                                   // Start with reference to pubsub instance so plugin can contact host.
+                var extStart = extensions[(string)extName].Start();                                   // Start with reference to pubsub instance so plugin can contact host.
                 if (extStart != "OK") throw new System.MethodAccessException("Extension " + extName + "failed to start correctly, returned error: " + Environment.NewLine + extStart);
                 else
                 {
                     Logger.LogInformation("Extension " + extName.ToString() + " started.");
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                Logger.LogError("Extension " + extName.ToString() + " started with errors, may not be functional");
+                Logger.LogError("Extension " + extName.ToString() + " started with errors, may not be functional. Error: " + Environment.NewLine + ex.ToString());
             }
         }
 
