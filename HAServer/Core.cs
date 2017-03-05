@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Commons;
+using System.Threading.Tasks;
 
 // To run from the command line, type 'dotnet run' from the directory with the main project files.
 // Camel case for variables, Pascal case for methods
@@ -19,6 +20,7 @@ using Commons;
 //TODO: Add sunris/sunset as extensions
 //TODO: Once completed, update all the Nuget packages to the latest
 //TODO: Remove system.composition nuget after testing
+//TODO: Ensure all libraries used have the correct open source license documented (eg. Newtonsoft JSON)
 namespace HAServer
 {
     public class Core
@@ -46,7 +48,7 @@ namespace HAServer
             {
                 // Setup logging
                 ApplicationLogging.Logger.AddMyLogger();
-
+                Console.WriteLine(System.Threading.Thread.CurrentThread.ManagedThreadId);
                 string thisprocessname = Process.GetCurrentProcess().ProcessName;
                 if (Process.GetProcesses().Count(p => p.ProcessName == thisprocessname) > 1)
                 {
@@ -73,12 +75,18 @@ namespace HAServer
                     .Build();
 
                 // Setup globals
-
+                foreach (var net in svrCfg.GetSection("Networks").GetChildren())
+                {
+                        Globals.networks.Add(net.Value);
+                }
                 Globals.networkName = svrCfg.GetSection("Server:NetworkName").Value;
                 if (Globals.networkName == null) Globals.networkName = "My Home";
+
                 string myCat = null;
+                var systemExists = false;
                 foreach (var cat in svrCfg.GetSection("Categories").GetChildren())
                 {
+                    if (cat.Value.ToUpper() == "SYSTEM") systemExists = true;
                     if (cat.Key.ToUpper().Contains("ICON"))
                     {
                         Globals.categories.Add(new CatStruc { name = myCat, icon = cat.Value.ToUpper() });
@@ -86,6 +94,10 @@ namespace HAServer
                     {
                         myCat = cat.Value.ToUpper();
                     }
+                }
+                if (!systemExists)
+                {
+                    throw(new Exception("No SYSTEM category exists in HASERVER.INI. Can't start. Add a SYSTEM category before continuing."));
                 }
 
                 // Setup PubSub. needs to be first service started to start message queue
@@ -103,14 +115,20 @@ namespace HAServer
                     svrCfg.GetSection("InfluxDB:adminPwd").Value);                    //TODO: Add constructor parameters
 
                 // Load extensions
-                var extFilesLoc = svrCfg.GetSection("Server:ExtensionFilesLoc").Value;
-                if (extFilesLoc == null) extFilesLoc = "extensions";
-                extensions = new Extensions(Path.Combine(Directory.GetCurrentDirectory(), extFilesLoc));
+                Task.Factory.StartNew(() =>
+                {
+                    var extFilesLoc = svrCfg.GetSection("Server:ExtensionFilesLoc").Value;
+                    if (extFilesLoc == null) extFilesLoc = "extensions";
+                    extensions = new Extensions(Path.Combine(Directory.GetCurrentDirectory(), extFilesLoc));
+                });
 
                 // Load plugins
-                var plugFilesLoc = svrCfg.GetSection("Server:PluginFilesLoc").Value;
-                if (plugFilesLoc == null) plugFilesLoc = "plugins";
-                plugins = new Plugins(Path.Combine(Directory.GetCurrentDirectory(), plugFilesLoc));
+                Task.Factory.StartNew(() =>
+                {
+                    var plugFilesLoc = svrCfg.GetSection("Server:PluginFilesLoc").Value;
+                    if (plugFilesLoc == null) plugFilesLoc = "plugins";
+                    plugins = new Plugins(Path.Combine(Directory.GetCurrentDirectory(), plugFilesLoc));
+                });
 
                 // Setup web services
                 webServices = new WebServices(
@@ -125,7 +143,7 @@ namespace HAServer
 
             Logger.LogInformation("HA Console startup completed. Press 'X' to exit console.");
 
-            pubSub.SetServerState(Consts.ServiceState.RUNNING);                                 // Start message queue
+            //pubSub.SetServerState(Consts.ServiceState.RUNNING);                                 // Start message queue
 
             // Block waiting on key input, looping until 'X' is pressed, or console shutdown (shutdown caught by closehandler)
             ConsoleKey cki = 0;

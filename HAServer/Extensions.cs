@@ -24,6 +24,7 @@ namespace HAServer
 
         public Extensions(string locn)
         {
+            Console.WriteLine("Ext: " + Thread.CurrentThread.ManagedThreadId.ToString());
             string extName = "";
             try
             {
@@ -49,7 +50,7 @@ namespace HAServer
                                 if (extCfg.GetSection("ExtensionCfg:Enabled").Value != null && extCfg.GetSection("ExtensionCfg:Enabled").Value.ToUpper() == "TRUE")
                                 {
                                     Logger.LogInformation("Extension " + extName + " (" + extCfg.GetSection("ExtensionCfg:Desc").Value + ") enabled, loading...");
-                                    Core.pubSub.AddUserToAccessGroup("EXTENSIONS", extName + "." + extName);                                // Add to EXTENSIONS access group for pubsub
+                                    Core.pubSub.AddUserToAccessGroup("EXTENSIONS", "Extensions." + extName);                                // Add to EXTENSIONS access group for pubsub
                                     var myAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
                                     var extType = myAssembly.GetType(extName + "." + extName);          
                                     if (extType != null)
@@ -94,10 +95,9 @@ namespace HAServer
         }
 
         // Called from PubSub message processor for extensions subscriptions matching processed message
-        public bool RouteMessage(string client, Commons.HAMessage myMessage)
+        public bool RouteMessage(string client, Commons.HAMessage myMessage, string route)
         {
-            var clientRoute = client.Split('.');
-            var extMess = extensions[clientRoute[0]].NewMsg(clientRoute[1], myMessage);                       // Call relevant extension via client route
+            var extMess = extensions[client].NewMsg(route, myMessage);                       // Call relevant extension via client route
             return true;
         }
 

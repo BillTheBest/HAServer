@@ -93,7 +93,7 @@ namespace HAServer
                                             };
 
                                             // Add new channel with access
-                                            Core.pubSub.AddUpdChannel(plugCh, new ChannelSub
+                                            Core.pubSub.AddUpdChannel(plugName, plugCh, new ChannelSub
                                             {
                                                 desc = plugCfg.GetSection(section.Key + ":Desc").Value,
                                                 type = plugCfg.GetSection(section.Key + ":Type").Value,
@@ -102,7 +102,7 @@ namespace HAServer
                                                 max = plugCfg.GetSection(section.Key + ":Max").Value,
                                                 units = plugCfg.GetSection(section.Key + ":Units").Value,
                                                 source = "PLUGIN",
-                                                auth = new List<AccessAttribs>
+                                                auth = new List<AccessAttribs>                                  // Add default access permissions
                                                 {
                                                     new AccessAttribs
                                                     {
@@ -119,9 +119,6 @@ namespace HAServer
                                                     }
                                                 }
                                             });
-
-                                            // All plugins have RW access to their channels (cat/classname) and only R access to other channels
-                                            Core.pubSub.Subscribe(plugName, plugCh);
                                         }
                                     }
                                 }

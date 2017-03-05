@@ -10,7 +10,9 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.IO;
 using System.Text;
+using Newtonsoft.Json;
 
+//NUGET: NewtonsSoft.JSon
 // For automatic building when changed, add the extension to the build dependencies in the solution. Then any changes to the extension source will be built before HAServer
 // Set to compile with Core Framework 1.1
 // Namespace same name as plugin file name including capitalisation
@@ -29,16 +31,18 @@ namespace Rules
         public string desc;
 
         private static IPubSub _host;
+        private static int _myNetNum;
 
         public Rules(IPubSub myHost)
         {
             _host = myHost;
+            _myNetNum = Globals.networks.IndexOf(Globals.networkName);
         }
 
-
-        // Open events database
+        // Execute startup functions
         public string Start()
         {
+            //Console.WriteLine("Rules: " + System.Threading.Thread.CurrentThread.ManagedThreadId.ToString());
             dbName = _host.GetIniSection("ExtensionCfg:DBName");
             dbLoc = _host.GetIniSection("ExtensionCfg:DBLoc");
 
@@ -51,42 +55,136 @@ namespace Rules
                 instance = ""
             });
 
-            using (var eventsDB = new RulesDB())
+            using (var rulesDB = new RulesDB())
             {
-                eventsDB.Database.EnsureCreated();                      // Create DB file & structure if file didn't exist
+                rulesDB.Database.EnsureCreated();                      // Create DB file & structure if file didn't exist
 
-                //eventsDB.Actions.Add(new Action {
+                // Create admin channels for all tables
+                AddTableChannel("ACTIONS");
+                AddTableChannel("EVENTACTIONS");
+                AddTableChannel("EVENTS");
+                AddTableChannel("EVENTTRIGGERS");
+                AddTableChannel("TRIGGERS");
+
+                //rulesDB.Actions.Add(new Action
+                //{
                 //    ActionName = "Test",
                 //    ActionDescription = "My Test",
-                //    ActionClass = "CBUS"
+                ///    ActionClass = "CBUS"
                 //});
+                //var count = rulesDB.SaveChanges();
 
-                //var count = eventsDB.SaveChanges();
-                //Console.WriteLine("{0} records saved to database", count);
+                var testAction = new Action
+                {
+                    ActionCategory = "LIGHTING",
+                    ActionClass = "CBUS",
+                    ActionInstance = "HALLWAY",
+                    ActionDelay = 0,
+                    ActionDescription = "Test Lighting",
+                    ActionScope = "",
+                    ActionData = "100",
+                    ActionRandom = false,
+                    ActionTrigTopic = 1,
+                    ActionLogLevel = 1,
+                    ActionFunction = 1,
+                    ActionName = "Turn on Hallway",
+                    ActionNetwork = _myNetNum
+                };
 
-                //foreach (var action in eventsDB.Actions)
-                //{
-                //    Logger.LogInformation(" - {0}", action.ActionName);
-                //}
+                //WHAT DOES TRIGTOPIC (ACTION TRIGGER CHANNEL) DO?
+
+                _host.Publish("ADMIN", new ChannelKey
+                {
+                    network = Globals.networkName,
+                    category = "SYSTEM",
+                    className = "RULES",
+                    instance = "ACTIONS"
+                }, "ADD", JsonConvert.SerializeObject(testAction));
+
+
+        //Console.WriteLine("{0} records saved to database", count);
+
+        //foreach (var action in eventsDB.Actions)
+        //{
+        //    Logger.LogInformation(" - {0}", action.ActionName);
+        //}
             }
-
-
             return "OK";
-
         }
 
         // Handle messages subscribed to
-        // TODO: on own thread? Add to interface?
-        public object NewMsg(string route, HAMessage message)
+        public string NewMsg(string route, HAMessage message)
         {
-            _host.WriteLog(LOGTYPES.INFORMATION, "Got message " + message.instance.ToString());
+            switch (route.ToUpper())
+            {
+                case "RULES":
+                    ProcessRules(message);
+                    break;
+                case "ADMIN":
+                    ProcessAdmin(message);
+                    break;
+                default:
+                    break;
+            }
+            _host.WriteLog(LOGTYPES.INFORMATION, "Rules engine Got message " + message.instance.ToString());            // TEST
             return null;
         }
 
+        // Execute any shut down functions before going offline
         public string Stop()
         {
             return "OK";
         }
+
+        bool AddTableChannel(string tableName)
+        {
+            return _host.AddUpdChannel("Rules", new ChannelKey
+            {
+                network = Globals.networkName,
+                category = "SYSTEM",
+                className = "RULES",
+                instance = tableName
+            }, new ChannelSub
+            {
+                desc = "Rules table admin channel for " + tableName,
+                type = "Rules Table",
+                source = "ADMIN",
+                auth = new List<AccessAttribs>                                  // Add default access permissions
+                                                {
+                                                    new AccessAttribs
+                                                    {
+                                                        name = "ADMINS",
+                                                        access = "RW"
+                                                    }
+                                                }
+            }, "Extensions");
+        }
+
+        string ProcessRules(HAMessage message)
+        {
+            return "OK";
+        }
+
+        string ProcessAdmin(HAMessage message)
+        {
+            switch (message.scope.ToUpper())
+            {
+                case "ADD":
+                    var func = JsonConvert.DeserializeObject<Dictionary<string, string>>(message.data);
+                    if (func.TryGetValue("ActionName", out string myVal))
+                    {
+                        Console.WriteLine("Name of Action: " + myVal);
+                    }
+                    break;
+                case "GET":
+                    Console.WriteLine("GET Action: " + message.data);
+                    break;
+                default:
+                    break;
+            }
+            return "OK";
+        }
+
     }
 
     // EF ORM structure definitions for events and triggers
@@ -176,7 +274,7 @@ namespace Rules
 
         public long? ActionNetwork { get; set; }
 
-        public long? ActionCategory { get; set; }
+        public string ActionCategory { get; set; }
 
         //[StringLength(2147483647)]
         public string ActionClass { get; set; }
@@ -215,7 +313,7 @@ namespace Rules
 
         public long? TrigStateNetwork { get; set; }
 
-        public long? TrigStateCategory { get; set; }
+        public string TrigStateCategory { get; set; }
 
         //[StringLength(2147483647)]
         public string TrigStateClass { get; set; }
@@ -234,7 +332,7 @@ namespace Rules
 
         public long? TrigChgNetwork { get; set; }
 
-        public long? TrigChgCategory { get; set; }
+        public string TrigChgCategory { get; set; }
 
         //[StringLength(2147483647)]
         public string TrigChgClass { get; set; }

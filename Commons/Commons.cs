@@ -10,6 +10,7 @@ namespace Interfaces
     {
         string Start();
         string Stop();
+        string NewMsg(string route, HAMessage message);
     }
 
     public interface IPlugin
@@ -20,7 +21,7 @@ namespace Interfaces
 
     public interface IPubSub
     {
-        bool AddUpdChannel(ChannelKey channel, ChannelSub channelSub, [CallerMemberName] string caller = "");
+        bool AddUpdChannel(string clientName, ChannelKey channel, ChannelSub channelSub, [CallerMemberName] string caller = "");
 
         /// <summary> 
         /// Subscribe to a specific channel. 
@@ -78,6 +79,7 @@ namespace Commons
     {
         public static string networkName;
         public static List<CatStruc> categories = new List<CatStruc>();
+        public static List<string> networks = new List<string>();
 
         public Globals()
         {

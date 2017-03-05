@@ -21,7 +21,7 @@ namespace TestPlugin
         {
             try
             {
-                var yy = 0;
+                //var yy = 0;
                 //var tt = 1 / yy;
 
                 // TODO: Maybe use callername instead of hard coding plugin name

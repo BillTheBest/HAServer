@@ -28,16 +28,34 @@ namespace SampleExtension
             _host = myHost;
         }
 
+        // Execute startup functions
         public string Start()
         {
             try
             {
-                //_host = myHost;
-                _host.Subscribe("sample2", new ChannelKey { network = "31 Needham", category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" }, "xx");
-                _host.Publish("sample1", new ChannelKey { network = "31 Needham", category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" }, "MYSCOPE", "MYDATA");
-                _host.WriteLog(Commons.LOGTYPES.INFORMATION, _host.GetIniSection("ExtensionCfg:desc"));
+                _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON"}, "SampleExtension");
+                _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "SYSTEM", className = "RULES", instance = "ACTIONS" });
+                System.Threading.Thread.Sleep(2000);
+                _host.Publish("ADMIN", new ChannelKey
+                {
+                    network = Commons.Globals.networkName,
+                    category = "SYSTEM",
+                    className = "RULES",
+                    instance = "ACTIONS"
+                }, "GET", "Test", "SampleExtension");
+                //_host.WriteLog(Commons.LOGTYPES.INFORMATION, _host.GetIniSection("ExtensionCfg:desc"));
                 //var t = 0;
                 //var y = 1 / t;
+
+                Task.Factory.StartNew(() =>
+                {
+                    while(true)
+                    {
+                        System.Threading.Thread.Sleep(1000);
+                        _host.Publish("SampleExtension", new ChannelKey { network = "31 Needham", category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" }, "MYSCOPE", "MYDATA");
+                    }
+                });
+
                 return "OK";
 
             }
@@ -47,6 +65,13 @@ namespace SampleExtension
             }
         }
 
+        // Handle messages subscribed to
+        public string NewMsg(string route, Commons.HAMessage message)
+        {
+            return "OK";
+        }
+
+        // Execute any shut down functions before going offline
         public string Stop()
         {
             return "OK";
