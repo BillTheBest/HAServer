@@ -32,18 +32,20 @@ namespace Rules
 
         private static IPubSub _host;
         private static int _myNetNum;
+        private static RulesDB _rulesDB;
 
         public Rules(IPubSub myHost)
         {
             _host = myHost;
             _myNetNum = Globals.networks.IndexOf(Globals.networkName);
+            _rulesDB = new RulesDB();
         }
 
         // Execute startup functions
         public string Start()
         {
-            //Console.WriteLine("Rules: " + System.Threading.Thread.CurrentThread.ManagedThreadId.ToString());
-            dbName = _host.GetIniSection("ExtensionCfg:DBName");
+            //Console.WriteLine("Rules: " + System.Threading.Thread.CurrentThread.ManagedThreadId.ToString());
+            dbName = _host.GetIniSection("ExtensionCfg:DBName");
             dbLoc = _host.GetIniSection("ExtensionCfg:DBLoc");
 
             // Subscribe to all messages (but only in this network)
@@ -55,60 +57,54 @@ namespace Rules
                 instance = ""
             });
 
-            using (var rulesDB = new RulesDB())
+            _rulesDB.Database.EnsureCreated();                      // Create DB file & structure if file didn't exist
+
+            // Create admin channels for all tables
+            AddTableChannel("ACTIONS");
+            AddTableChannel("EVENTACTIONS");
+            AddTableChannel("EVENTS");
+            AddTableChannel("EVENTTRIGGERS");
+            AddTableChannel("TRIGGERS");
+
+            //rulesDB.Actions.Add(new Action
+            //{
+            //    ActionName = "Test",
+            //    ActionDescription = "My Test",
+            ///    ActionClass = "CBUS"
+            //});
+            //var count = rulesDB.SaveChanges();
+
+            var testAction = new Action
             {
-                rulesDB.Database.EnsureCreated();                      // Create DB file & structure if file didn't exist
+                ActionCategory = "LIGHTING",
+                ActionClass = "CBUS",
+                ActionInstance = "HALLWAY",
+                ActionDelay = 0,
+                ActionDescription = "Test Lighting",
+                ActionScope = "",
+                ActionData = "100",
+                ActionRandom = false,
+                ActionTrigTopic = 1,
+                ActionLogLevel = 1,
+                ActionFunction = 1,
+                ActionName = "Turn on Hallway",
+                ActionNetwork = _myNetNum
+            };
 
-                // Create admin channels for all tables
-                AddTableChannel("ACTIONS");
-                AddTableChannel("EVENTACTIONS");
-                AddTableChannel("EVENTS");
-                AddTableChannel("EVENTTRIGGERS");
-                AddTableChannel("TRIGGERS");
+            //WHAT DOES TRIGTOPIC (ACTION TRIGGER CHANNEL) DO?
 
-                //rulesDB.Actions.Add(new Action
-                //{
-                //    ActionName = "Test",
-                //    ActionDescription = "My Test",
-                ///    ActionClass = "CBUS"
-                //});
-                //var count = rulesDB.SaveChanges();
+            _host.Publish(new ChannelKey
+            {
+                network = Globals.networkName,
+                category = "SYSTEM",
+                className = "RULES",
+                instance = "ACTIONS"
+            }, "ADD", JsonConvert.SerializeObject(testAction));
 
-                var testAction = new Action
-                {
-                    ActionCategory = "LIGHTING",
-                    ActionClass = "CBUS",
-                    ActionInstance = "HALLWAY",
-                    ActionDelay = 0,
-                    ActionDescription = "Test Lighting",
-                    ActionScope = "",
-                    ActionData = "100",
-                    ActionRandom = false,
-                    ActionTrigTopic = 1,
-                    ActionLogLevel = 1,
-                    ActionFunction = 1,
-                    ActionName = "Turn on Hallway",
-                    ActionNetwork = _myNetNum
-                };
-
-                //WHAT DOES TRIGTOPIC (ACTION TRIGGER CHANNEL) DO?
-
-                _host.Publish("ADMIN", new ChannelKey
-                {
-                    network = Globals.networkName,
-                    category = "SYSTEM",
-                    className = "RULES",
-                    instance = "ACTIONS"
-                }, "ADD", JsonConvert.SerializeObject(testAction));
-
-
-        //Console.WriteLine("{0} records saved to database", count);
-
-        //foreach (var action in eventsDB.Actions)
-        //{
-        //    Logger.LogInformation(" - {0}", action.ActionName);
-        //}
-            }
+            //foreach (var action in eventsDB.Actions)
+            //{
+            //    Logger.LogInformation(" - {0}", action.ActionName);
+            //}
             return "OK";
         }
 
@@ -126,8 +122,8 @@ namespace Rules
                 default:
                     break;
             }
-            _host.WriteLog(LOGTYPES.INFORMATION, "Rules engine Got message " + message.instance.ToString());            // TEST
-            return null;
+            _host.WriteLog(LOGTYPES.INFORMATION, "Rules engine Got message " + message.instance.ToString());            // TEST
+            return null;
         }
 
         // Execute any shut down functions before going offline
@@ -149,14 +145,14 @@ namespace Rules
                 desc = "Rules table admin channel for " + tableName,
                 type = "Rules Table",
                 source = "ADMIN",
-                auth = new List<AccessAttribs>                                  // Add default access permissions
-                                                {
-                                                    new AccessAttribs
-                                                    {
-                                                        name = "ADMINS",
-                                                        access = "RW"
-                                                    }
-                                                }
+                auth = new List<AccessAttribs>                                  // Add default access permissions
+                                                {
+ new AccessAttribs
+ {
+ name = "ADMINS",
+ access = "RW"
+ }
+ }
             }, "Extensions");
         }
 
@@ -167,16 +163,42 @@ namespace Rules
 
         string ProcessAdmin(HAMessage message)
         {
+            Dictionary<string, string> func = null;
+            var retChKey = new ChannelKey
+            {
+                network = Globals.networkName,
+                category = message.category,
+                className = message.className,
+                instance = message.instance
+            };
+            if (message.data.StartsWith("{"))
+            {
+                func = JsonConvert.DeserializeObject<Dictionary<string, string>>(message.data);
+            }
             switch (message.scope.ToUpper())
             {
                 case "ADD":
-                    var func = JsonConvert.DeserializeObject<Dictionary<string, string>>(message.data);
-                    if (func.TryGetValue("ActionName", out string myVal))
+                    switch (message.instance.ToUpper())
                     {
-                        Console.WriteLine("Name of Action: " + myVal);
+                        case "ACTIONS":
+                            if (func.TryGetValue("ActionName", out string myVal))
+                            {
+                                _host.Publish(retChKey, "RESULT", "MyData");
+                            }
+                            break;
+                        default:
+                            break;
                     }
                     break;
                 case "GET":
+                    switch (message.instance.ToUpper())
+                    {
+                        case "ACTIONS":
+                            _host.Publish(retChKey, "RESULT", JsonConvert.SerializeObject(_rulesDB.Actions.Find(message.data)));
+                            break;
+                        default:
+                            break;
+                    }
                     Console.WriteLine("GET Action: " + message.data);
                     break;
                 default:
@@ -184,9 +206,7 @@ namespace Rules
             }
             return "OK";
         }
-
     }
-
     // EF ORM structure definitions for events and triggers
 
     public partial class RulesDB : DbContext

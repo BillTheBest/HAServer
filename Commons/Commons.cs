@@ -32,7 +32,7 @@ namespace Interfaces
         /// <param name="channel">The channel to subscribe to (and any children)</param>
         int Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
 
-        void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "");
+        void Publish(ChannelKey channel, string scope, string data);
 
         string GetIniSection(string section, [CallerFilePath] string caller = "");
 

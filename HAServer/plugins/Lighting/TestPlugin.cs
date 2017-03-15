@@ -26,7 +26,7 @@ namespace TestPlugin
 
                 // TODO: Maybe use callername instead of hard coding plugin name
                 _channel.instance = "JulieWIR";
-                _host.Publish("TestPlugin", _channel, "value", "100", "Plugins");
+                _host.Publish(_channel, "value", "100");
                 _host.WriteLog(LOGTYPES.INFORMATION, "From Test plugin");
                 return "OK";
             }

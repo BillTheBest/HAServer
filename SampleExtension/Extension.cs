@@ -36,13 +36,13 @@ namespace SampleExtension
                 _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON"}, "SampleExtension");
                 _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "SYSTEM", className = "RULES", instance = "ACTIONS" });
                 System.Threading.Thread.Sleep(2000);
-                _host.Publish("ADMIN", new ChannelKey
+                _host.Publish(new ChannelKey
                 {
                     network = Commons.Globals.networkName,
                     category = "SYSTEM",
                     className = "RULES",
                     instance = "ACTIONS"
-                }, "GET", "Test", "SampleExtension");
+                }, "GET", "Test");
                 //_host.WriteLog(Commons.LOGTYPES.INFORMATION, _host.GetIniSection("ExtensionCfg:desc"));
                 //var t = 0;
                 //var y = 1 / t;
@@ -51,8 +51,8 @@ namespace SampleExtension
                 {
                     while(true)
                     {
-                        System.Threading.Thread.Sleep(1000);
-                        _host.Publish("SampleExtension", new ChannelKey { network = "31 Needham", category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" }, "MYSCOPE", "MYDATA");
+                        System.Threading.Thread.Sleep(10000);
+                        _host.Publish(new ChannelKey { network = "31 Needham", category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" }, "MYSCOPE", "MYDATA");
                     }
                 });
 

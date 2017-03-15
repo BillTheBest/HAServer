@@ -51,8 +51,8 @@ namespace HAServer
         {
             try
             {
-                Task.Factory.StartNew(() =>                                                                 // Manage messages on the queue via separate thread
-                {
+                Task.Factory.StartNew(() =>                                                                 // Manage messages on the queue via separate thread
+                {
                     var channelKey = new ChannelKey();
                     foreach (Commons.HAMessage HAMessage in messQ.GetConsumingEnumerable())
                     {
@@ -64,11 +64,11 @@ namespace HAServer
                         channelKey.instance = HAMessage.instance;
                         if (channels.ContainsKey(channelKey))
                         {
-                            var clients = channels[channelKey].clients;                                         // Get subscribing clients
-                            foreach (var client in clients.ToList())                                        // ToList avoids contention when looping while the original collection is modified
-                            {
-                                if (client.access.Contains("R"))                            // Read allows us to subscribe & receive messages
-                                {
+                            var clients = channels[channelKey].clients;                                         // Get subscribing clients
+                            foreach (var client in clients.ToList())                                        // ToList avoids contention when looping while the original collection is modified
+                            {
+                                if (client.access.Contains("R"))                            // Read allows us to subscribe & receive messages
+                                {
                                     var clientRoute = client.name.Split('.');
                                     switch (clientRoute[0].ToUpper())
                                     {
@@ -76,11 +76,11 @@ namespace HAServer
                                             Core.extensions.RouteMessage(clientRoute[1], HAMessage, channels[channelKey].source);
                                             break;
                                         case "PLUGINS":
-                                            //Core.plugins.RouteMessage(client.name, HAMessage);
-                                            break;
+                                            //Core.plugins.RouteMessage(client.name, HAMessage);
+                                            break;
                                         case "CORE":
-                                            //Core.RouteMessage(client.name, HAMessage);
-                                            break;
+                                            //Core.RouteMessage(client.name, HAMessage);
+                                            break;
                                         default:
                                             Logger.LogError("Can't route message " + HAMessage.instance + "\\" + HAMessage.instance + "\\" + HAMessage.instance + " to " + client.name);
                                             break;
@@ -90,13 +90,13 @@ namespace HAServer
                         }
                         if (Core.DebugMode) Logger.LogDebug(String.Format("Category: {0}, Class: {1}, Instance: {2}, Scope: {3}, Data: {4}", HAMessage.category, HAMessage.className, HAMessage.instance, HAMessage.scope, HAMessage.data));
                         // TODO: Log to timeseries
-        
+
                     }
                 }, TaskCreationOptions.LongRunning);
 
                 // Setup access groups
                 clientGroups["EXTENSIONS"] = new List<string>();
-//-------
+                //-------
                 // Test
                 clientGroups["ADMINS"] = new List<string> { "PubSub.myClient", "Extensions.Rules" };
 
@@ -109,18 +109,18 @@ namespace HAServer
                 }, new ChannelSub
                 {
                     auth = new List<AccessAttribs>
-                {
-                    new AccessAttribs
-                    {
-                        name = "ADMINS",
-                        access = "RW"
-                    },
-                    new AccessAttribs
-                    {
-                        name = "EXTENSIONS",
-                        access = "RW"
-                    }
-                }
+ {
+ new AccessAttribs
+ {
+ name = "ADMINS",
+ access = "RW"
+ },
+ new AccessAttribs
+ {
+ name = "EXTENSIONS",
+ access = "RW"
+ }
+ }
                 }, "Extensions");           // Test route to extensions
 
                 AddUpdChannel("Rules", new ChannelKey
@@ -132,18 +132,18 @@ namespace HAServer
                 }, new ChannelSub
                 {
                     auth = new List<AccessAttribs>
-                {
-                    new AccessAttribs
-                    {
-                        name = "ADMINS",
-                        access = "RW"
-                    },
-                    new AccessAttribs
-                    {
-                        name = "EXTENSIONS",
-                        access = "RW"
-                    }
-                }
+ {
+ new AccessAttribs
+ {
+ name = "ADMINS",
+ access = "RW"
+ },
+ new AccessAttribs
+ {
+ name = "EXTENSIONS",
+ access = "RW"
+ }
+ }
                 }, "Extensions");
 
                 _serviceState = Consts.ServiceState.RUNNING;
@@ -155,14 +155,17 @@ namespace HAServer
         }
 
         // Submit a message to the event message queue. Requires the message structure to be prepopulated
-        //TODO: Is clientname needed? caller won't be populated by plugins. Also publish for plugins should be restricted to cat/classname. Need to do this via reflection, but how expensive?
+        //TODO: Is clientname needed? No, as routing will occur based on subscription info - publish only puts on message queue. subscription will check access rights. 
+        // Only allow registered clients with a subscription can publish so that errant plugins/inputs cant send messages when they don't have rights. Use GUID to validate access in the net protocol handler
+        //TODO: caller won't be populated by plugins. Also publish for plugins should be restricted to cat/classname. Need to do this via reflection, but how expensive?
+        //TODO: Check that caller has subscribed to this channel before allowing to publish. Use a guid when subscribing that is passed back and then used for all publish? MQTT supports this??
         //TODO: Return value if not successful. Maybe move message log write to another queue & thread
-        public async void Publish(string clientName, ChannelKey channel, string scope, string data, [CallerFilePath] string caller = "")
+        public async void Publish(ChannelKey channel, string scope, string data)
         {
             try
             {
-                if (_serviceState != Consts.ServiceState.STOPPED && messQ.Count < 1000)                      // Don't add messages to the message queue if service is stopped, and if it is paused for too long start dropping messages
-                {
+                if (_serviceState != Consts.ServiceState.STOPPED && messQ.Count < 1000)                      // Don't add messages to the message queue if service is stopped, and if it is paused for too long start dropping messages
+                {
                     var myMessage = new Commons.HAMessage
                     {
                         network = Globals.networkName,
@@ -173,34 +176,36 @@ namespace HAServer
                         data = data
                     };
 
-                    //TODO: Check that caller has W access
+                    //TODO: Check if caller has access rights
 
                     if (messQ.TryAdd(myMessage))
                     {
-                        await Core.timeSeries.WriteTS(myMessage);                                               // Log to message log
-                    };
-                    //return true;
-                }
-                //return false;                                                                                   // Can't add messae
-            }
+                        await Core.timeSeries.WriteTS(myMessage);                                               // Log to message log
+                    };
+                    //return true;
+                }
+                //return false;                                                                                   // Can't add messae
+            }
             catch (Exception ex)
             {
-                //TODO
-                Logger.LogCritical("Can't submit message to message queue - Exiting. Error: "  + Environment.NewLine + ex.ToString());
+                //TODO
+                Logger.LogCritical("Can't submit message to message queue - Exiting. Error: " + Environment.NewLine + ex.ToString());
                 throw;
             }
         }
 
         // Create channels.
+        //TODO: WHat happens if the same channel is created several times.
+        //TODO" Need security on adding channels
         public bool AddUpdChannel(string clientName, ChannelKey channel, ChannelSub channelSub, [CallerMemberName] string caller = "")
         {
-            channelSub.author = Path.GetFileNameWithoutExtension(caller);                                                             // Enforce author as caller, regardless of setting passed.
-            //var subKeys = channels.Keys;                                                                   // Get the existing channel keys before adding the new one
-            channels[channel] = channelSub;                                                    // Create new channel
+            channelSub.author = Path.GetFileNameWithoutExtension(caller);                                                             // Enforce author as caller, regardless of setting passed.
+            //var subKeys = channels.Keys;                                                                   // Get the existing channel keys before adding the new one
+            channels[channel] = channelSub;                                                    // Create new channel
 
             // Add any previous requests to subscribe to this channel before it was created
-            foreach (var oldSub in subRequests)                                             // Does the old subscription request match the new channel including wildcards?
-            {
+            foreach (var oldSub in subRequests)                                             // Does the old subscription request match the new channel including wildcards?
+            {
                 if (oldSub.channelKey.network == "" || oldSub.channelKey.network == channel.network)
                 {
                     if (oldSub.channelKey.category == "" || oldSub.channelKey.category == channel.category)
@@ -214,16 +219,11 @@ namespace HAServer
                         }
                     }
                 }
-                //if (oldSub.channelKey.network != "") subKeys = subKeys.Where(x => x.network == oldSub.channelKey.network).ToList();             
-                //if (oldSub.channelKey.category != "") subKeys = subKeys.Where(x => x.category == oldSub.channelKey.category).ToList();
-                //if (oldSub.channelKey.className != "") subKeys = subKeys.Where(x => x.className == oldSub.channelKey.className).ToList();
-                //if (oldSub.channelKey.instance != "") subKeys = subKeys.Where(x => x.instance == oldSub.channelKey.instance).ToList();
-                //if (subKeys.Contains(channel)) Subscribe(oldSub.clientName, oldSub.channelKey, oldSub.caller);
             }
 
-            Subscribe(clientName, channel, channelSub.author);                                             // Caller auto subscribe
-            // TODO: true is redundant
-            return true;
+            Subscribe(clientName, channel, channelSub.author);                                             // Caller auto subscribe
+            // TODO: true is redundant
+            return true;
         }
 
         // Subscribe to channel for Ext/Plug.Client. Return null if channel does not exist else return the number of channels the request was granted a subscription
@@ -231,51 +231,51 @@ namespace HAServer
         {
             string clientAccess;
             var fullClientName = Path.GetFileNameWithoutExtension(caller) + "." + clientName;
-            //if (!channels.Keys.Contains(channel)) subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added if the channel isn't established now
-            subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added including wildcards
+            //if (!channels.Keys.Contains(channel)) subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added if the channel isn't established now
+            subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added including wildcards
 
-            var subKeys = channels.Keys;                                                                   // Filter keys so that wildcard "" (ALL) is catered for.
-            if (channel.network != "") subKeys = subKeys.Where(x => x.network == channel.network).ToList();
+            var subKeys = channels.Keys;                                                                   // Filter keys so that wildcard "" (ALL) is catered for.
+            if (channel.network != "") subKeys = subKeys.Where(x => x.network == channel.network).ToList();
             if (channel.category != "") subKeys = subKeys.Where(x => x.category == channel.category).ToList();
             if (channel.className != "") subKeys = subKeys.Where(x => x.className == channel.className).ToList();
             if (channel.instance != "") subKeys = subKeys.Where(x => x.instance == channel.instance).ToList();
 
             // Check the auth table for group access and if the subscribing entity is part of a group in the auth table.
-            foreach(var subKey in subKeys)                                                              // Loop through all channels that match subscription request
-            {
+            foreach (var subKey in subKeys)                                                              // Loop through all channels that match subscription request
+            {
                 clientAccess = "";
                 var subscription = channels[subKey];
-                foreach (var subGroup in subscription.auth)                                         // Get access rights for group client is a member of
-                {
-                    if (clientGroups.TryGetValue(subGroup.name, out var clientGroup))                                   // Lookup clients associated with group
-                    {
+                foreach (var subGroup in subscription.auth)                                         // Get access rights for group client is a member of
+                {
+                    if (clientGroups.TryGetValue(subGroup.name, out var clientGroup))                                   // Lookup clients associated with group
+                    {
                         if (clientGroup.Contains(fullClientName))
                         {
                             clientAccess = subGroup.access;
-                            if (subGroup.access == "RW") break;                                         // RW access takes precidence if user is a member of multiple groups
-                        }
+                            if (subGroup.access == "RW") break;                                         // RW access takes precidence if user is a member of multiple groups
+                        }
                     }
                 }
 
                 // Setup specific access for the subscribing entity from the group lookup into the subscription clients table for faster message processing
-                if (clientAccess != "")                                                                   // Some access allowed so setup
-                {
+                if (clientAccess != "")                                                                   // Some access allowed so setup
+                {
                     var newAccess = new AccessAttribs
                     {
                         name = fullClientName,
                         access = clientAccess
                     };
-                    var exists = subscription.clients.FindIndex(x => x.name == fullClientName);     // Look for fullClientName already in list (assume there could be any access strings)
-                    if (exists != -1)
+                    var exists = subscription.clients.FindIndex(x => x.name == fullClientName);     // Look for fullClientName already in list (assume there could be any access strings)
+                    if (exists != -1)
                     {
-                        subscription.clients[exists] = newAccess;                                   // Update if existing
-                    }
+                        subscription.clients[exists] = newAccess;                                   // Update if existing
+                    }
                     else
                     {
-                        subscription.clients.Add(newAccess);                                        // Add if new
-                    }
-                    channels[channel] = subscription;                                          // Update subscription with new client access info
-                }
+                        subscription.clients.Add(newAccess);                                        // Add if new
+                    }
+                    channels[channel] = subscription;                                          // Update subscription with new client access info
+                }
             }
             return subKeys.Count;
         }
@@ -284,8 +284,8 @@ namespace HAServer
         public string GetIniSection(string section, [CallerFilePath] string caller = "")
         {
             var extName = Path.GetFileNameWithoutExtension(caller);
-            if (caller == "" || !Core.extensions.extInis.Keys.Contains(extName)) return null;        // Check if asking for the right extension
-            return Core.extensions.extInis[extName].GetSection(section).Value;
+            if (caller == "" || !Core.extensions.extInis.Keys.Contains(extName)) return null;        // Check if asking for the right extension
+            return Core.extensions.extInis[extName].GetSection(section).Value;
         }
 
         public bool WriteLog(Commons.LOGTYPES type, string desc, [CallerFilePath] string caller = "")
@@ -320,4 +320,3 @@ namespace HAServer
 
     }
 }
-
