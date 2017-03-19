@@ -26,7 +26,7 @@ namespace HAServer
     public class Core
     {
         // Globals
-        public static bool DebugMode = false;
+        public static bool _debug = false;
         public static bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         public static object consoleLock = new object();                                                    // Used to ensure only 1 thread writes to console output
         public static IConfigurationRoot svrCfg;
@@ -46,9 +46,11 @@ namespace HAServer
         {
             try
             {
+                if (Debugger.IsAttached) _debug = true;
+
                 // Setup logging
                 ApplicationLogging.Logger.AddMyLogger();
-                Console.WriteLine(System.Threading.Thread.CurrentThread.ManagedThreadId);
+
                 string thisprocessname = Process.GetCurrentProcess().ProcessName;
                 if (Process.GetProcesses().Count(p => p.ProcessName == thisprocessname) > 1)
                 {
@@ -156,8 +158,8 @@ namespace HAServer
                         Console.Clear();
                         break;
                     case ConsoleKey.D:                             // Debug mode
-                        DebugMode = !DebugMode;
-                        Logger.LogInformation("Debug mode: " + DebugMode.ToString());
+                        _debug = !_debug;
+                        Logger.LogInformation("Debug mode: " + _debug.ToString());
                         break;
                     case ConsoleKey.S:
                         //ListStateStore();

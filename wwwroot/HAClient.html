@@ -5,23 +5,30 @@
 </head>
 <body id="body">
 <P> wwroot file </P>
-this is a test
+this is a test<br/>
+    <div id="status"></div>
     <script src="mqtt.min.js"></script>
     <script>
         //var client = mqtt.connect('ws://test.mosquitto.org:8080/HAclient')
 
-        var client = mqtt.connect('ws://192.168.0.111:80/HAclient')
+        var client = mqtt.connect('ws://192.168.0.112:80/HAclient', { keepalive: 10 })
+        document.getElementById("status").innerText = "connecting"
 
         client.on('connect', function () {
-                alert("connectedee ")
-                client.subscribe('presence')
-                client.publish('presence', 'Hello mqtt')
+            document.getElementById("status").innerText = "connectedd"
+            client.subscribe({ 'test1': 0, 'test2': 1 });
+                client.publish('LIGHTING\\CBUS\\BEDCOCOON\\VALUE', '50')
             })
 
         client.on('message', function (topic, message) {
             // message is Buffer
+            document.getElementById("status").innerText = "topic '" + topic + "' msg received: " + message
             console.log(message.toString())
             client.end()
+        })
+
+        client.on('close', function () {
+            document.getElementById("status").innerText = "closed"
         })
 
         /*var ws = new WebSocket("ws://localhost:80/HAclient");
