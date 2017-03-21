@@ -6,7 +6,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using Microsoft.Extensions.Logging;
-
+using System.Net.Sockets;
 
 namespace HAServer
 {
@@ -43,10 +43,11 @@ namespace HAServer
         public int procRemLen;
     }
 
+    // MQTT frame and protocol handler for websockets and TCP sockets
     public class MQTTServer
     {
         public bool connected;
-        public ProtFlags wsFlags;
+        public ProtFlags flags;
         public uint control;
         public string IPAddr;
         public string port;
@@ -60,15 +61,33 @@ namespace HAServer
         public ConnFlags connFlags;
         public List<Byte> buffer;
         public WebSocket websocket;
+        public Socket socket;
         public List<Topic> topics;
         public Timer MQTTPingTimeout;
         public Timer frameTimeout;
 
         static public ILogger Logger = ApplicationLogging.CreateLogger<MQTTServer>();
 
-        public MQTTServer(WebSocket webSocket, string clientIP, string clientPort)
+        // Constructor for MQTT over TCP
+        public MQTTServer(Socket TCPSocket, string clientIP, string clientPort)
         {
-            wsFlags = new ProtFlags {
+            socket = TCPSocket;
+            websocket = null;
+            Init(clientIP, clientPort);
+        }
+
+        // Constructor for MQTT over WebSockets
+        public MQTTServer(WebSocket clientWebsocket, string clientIP, string clientPort)
+        {
+            websocket = clientWebsocket;
+            socket = null;
+            Init(clientIP, clientPort);
+        }
+
+        private void Init(string clientIP, string clientPort)
+        {
+            flags = new ProtFlags
+            {
                 gotLen = false,
                 bytesToGet = 0,
                 lenMult = 1,
@@ -85,14 +104,14 @@ namespace HAServer
             numFrames = 0;
             waitOnPubRel = 0;
             connFlags = new ConnFlags();
-            websocket = webSocket;
             topics = new List<Topic>();
             buffer = new List<Byte>();
             MQTTPingTimeout = new Timer(ClientTimeout, null, 1000 * MQTT_CONST.CLIENT_TIMEOUT, 1000 * MQTT_CONST.CLIENT_TIMEOUT);
             frameTimeout = new Timer(FrameTimeout, null, 1000 * MQTT_CONST.FRAME_TIMEOUT, 1000 * MQTT_CONST.FRAME_TIMEOUT);
+
         }
 
-        // Manage the MQTT frame here assuming multiple websocket frames are sent to make up a MQTT frame, and to extract the frame size to know when a frame is fully received
+        // Manage the MQTT frame here assuming multiple websocket/socket frames are sent to make up a MQTT frame, and to extract the frame size to know when a frame is fully received
         public bool HandleFrame(List<Byte> frameBuf, int receivedCnt)
         {
             //TODO: Chech for buffer overruns when extracting string lengths
@@ -107,28 +126,28 @@ namespace HAServer
                 frameTimeout.Change(Timeout.Infinite, Timeout.Infinite);         // stop frame timer as we have received completed frame
                 for (var i = 0; i < receivedCnt; i++)
                 {
-                    if (!wsFlags.gotLen)                       // Process fixed header to get MQTT control byte and remaining bytes
+                    if (!flags.gotLen)                       // Process fixed header to get MQTT control byte and remaining bytes
                     {
-                        if (wsFlags.bufIndex == 0)
+                        if (flags.bufIndex == 0)
                         {
                             control = frameBuf.ElementAt(0);
                             if ((control >> 4) == MQTT_CONST.MQTT_MSG_PINGREQ_TYPE || (control >> 4) == MQTT_CONST.MQTT_MSG_DISCONNECT_TYPE)  // handle messages with no variable header / payload bytes to receive
                             {
-                                wsFlags.gotLen = true;
-                                wsFlags.bytesToGet = 1;
+                                flags.gotLen = true;
+                                flags.bytesToGet = 1;
                             }
                         }
                         else
                         {
-                            if (wsFlags.bufIndex < 5)
+                            if (flags.bufIndex < 5)
                             {
-                                wsFlags.procRemLen += (int)((frameBuf.ElementAt(i) & 127) * wsFlags.lenMult);
-                                wsFlags.lenMult *= 128;
+                                flags.procRemLen += (int)((frameBuf.ElementAt(i) & 127) * flags.lenMult);
+                                flags.lenMult *= 128;
                                 if (frameBuf.ElementAt(i) < 128)          // No more bytes to encode length if value < 128
                                 {
-                                    wsFlags.bytesToGet = wsFlags.procRemLen;
-                                    wsFlags.gotLen = true;
-                                    wsFlags.bufIndex = 0;
+                                    flags.bytesToGet = flags.procRemLen;
+                                    flags.gotLen = true;
+                                    flags.bufIndex = 0;
                                 }
                             }
                             else
@@ -137,23 +156,23 @@ namespace HAServer
                                 return false;
                             }
                         }
-                        wsFlags.bufIndex++;
+                        flags.bufIndex++;
                     }
                     else                                // process the rest of the message after the fixed header
                     {
                         //TODO: Is it needed to save the buffer into the clioent object????
                         buffer.AddRange(frameBuf.Skip(i).Take(receivedCnt - i));            // put the remaining buffer into the client object for further processing
-                        wsFlags.bytesToGet = wsFlags.bytesToGet - (receivedCnt - i);
-                        if (wsFlags.bytesToGet < 0)
+                        flags.bytesToGet = flags.bytesToGet - (receivedCnt - i);
+                        if (flags.bytesToGet < 0)
                         {
                             CloseMQTTClient("Incorrect number of bytes received");
                             return false;
                         }
 
-                        if (wsFlags.bytesToGet == 0)           // received all the frame
+                        if (flags.bytesToGet == 0)           // received all the frame
                         {
                             //Console.WriteLine("to get: " + wsFlags.bytesToGet);
-                            if (wsFlags.bytesToGet == 0) HandleWSBinMsg();
+                            if (flags.bytesToGet == 0) HandleWSBinMsg();
                         }
                         break;                  // exit loop
                     }
@@ -413,7 +432,7 @@ namespace HAServer
 
                 case MQTT_CONST.MQTT_MSG_DISCONNECT_TYPE:
                     CloseMQTTClient("Client disconnected");                             // Orderly disconnect
-                    return true;
+                    return false;
 
                 default:
                     CloseMQTTClient("Invalid MQTT control request received: " + control);
@@ -426,17 +445,19 @@ namespace HAServer
         // Send to client 
         public async void MQTTSend(List<Byte> resp)
         {
-            await websocket.SendAsync(new ArraySegment<Byte>(resp.ToArray<Byte>()), WebSocketMessageType.Binary, true, CancellationToken.None);
+            if (websocket != null) await websocket.SendAsync(new ArraySegment<Byte>(resp.ToArray<Byte>()), WebSocketMessageType.Binary, true, CancellationToken.None);
+            //TODO: sockets untested
+            if (socket != null) await socket.SendAsync(new ArraySegment<Byte>(resp.ToArray<Byte>()), SocketFlags.None);
         }
 
-        // Reset frame state variables
+        // Reset frame state variables to prepare for new frame
         private void resetFrame()
         {
             //if (Core._debug) Logger.LogDebug("MQTT Frame reset");
-            wsFlags.gotLen = false;         // reset for next frame to process
-            wsFlags.bufIndex = 0;
-            wsFlags.lenMult = 1;
-            wsFlags.procRemLen = 0;
+            flags.gotLen = false;
+            flags.bufIndex = 0;
+            flags.lenMult = 1;
+            flags.procRemLen = 0;
             waitOnPubRel = 0;
             numFrames++;
             buffer = new List<byte>();
@@ -445,7 +466,7 @@ namespace HAServer
 
         private void FrameTimeout(Object stateInfo)
         {
-            CloseMQTTClient("MQTT WebSockets frame timed out");
+            CloseMQTTClient("MQTT frame timed out");
         }
 
         private void ClientTimeout(Object stateInfo)
@@ -454,13 +475,15 @@ namespace HAServer
         }
 
         // Close client MQTT session
-        public async void CloseMQTTClient(string reason)
+        public void CloseMQTTClient(string reason)
         {
             Logger.LogInformation("Closing MQTT session for client [" + name + "], reason: " + reason);
-            await websocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, reason, CancellationToken.None);
-            websocket.Dispose();
-            //TODO: Remove from client array and dispose object
-            //TODO: Remove all subscriptions
+            foreach (var topic in topics)
+            {
+                //TODO: Remove all subscriptions
+
+                //Core.pubSub.unSubscribe();
+            }
         }
 
         // Get UTF-8 char string of length determined by 1st and 2nd bytes in buffer segment

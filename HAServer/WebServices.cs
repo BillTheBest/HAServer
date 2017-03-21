@@ -21,6 +21,8 @@ using System.Collections.Generic;
 //TODO: Check when Core supports websockets compression. Edge does not support but chrome does. Can use https://github.com/vtortola/WebSocketListener
 // NUGET: Microsoft.AspNetCore 1.1.0, ..Hosting, ..ResponseCaching, ..ResponseCompression, ..Server.Kestrel, ..StaticFiles, ..WebSockets.Server, Microsoft.AspNetCore.Server.Kestrel.Https
 
+// TODO: TCP MQTT sockets example: http://stackoverflow.com/questions/12630827/using-net-4-5-async-feature-for-socket-programming 
+
 namespace HAServer
 {
     public class WebServices
@@ -177,25 +179,30 @@ namespace HAServer
 
                                             if (myClient.HandleFrame(bufList, received.Count) && myClient.connected && myClient.numFrames == 1)   // process frame
                                             {
-                                                var addCnt = 0;                // Add to clients list if new session, allow for multiple sessions from same IP.
-                                                do
+                                                if (myClient.connected && myClient.numFrames == 1)
                                                 {
-                                                    myClient.name = myClient.IPAddr + "_" + addCnt;
-                                                    addCnt++;
-                                                } while (!clients.TryAdd(myClient.name, myClient));
-                                            };
+                                                    var addCnt = 0;                // Add to clients list if new session, allow for multiple sessions from same IP.
+                                                    do
+                                                    {
+                                                        myClient.name = myClient.IPAddr + "_" + addCnt;
+                                                        addCnt++;
+                                                    } while (!clients.TryAdd(myClient.name, myClient));
+                                                }
+                                            }
+                                            else           // Error in processing frame, drop session
+                                            {
+                                                closeWSSess(webSocket, "Error processing MQTT frame, session closed");
+                                            }
                                             break;
 
                                         case WebSocketMessageType.Close:
-                                            myClient.CloseMQTTClient("Client closed WebSocket, reason: " + received.CloseStatus.ToString() + " " + received.CloseStatusDescription.ToString());
+                                            closeWSSess(webSocket, "Client closed WebSocket, reason: " + received.CloseStatus.ToString() + " " + received.CloseStatusDescription.ToString());
                                             break;
                                     }
                                 }
                                 catch (Exception ex)
                                 {
-                                    Logger.LogError("WebSockets frame error occured: " + ex.ToString());
-                                    await webSocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "MQTT Exception raised: " + ex.ToString(), CancellationToken.None);
-                                    webSocket.Dispose();
+                                    closeWSSess(webSocket, ex.ToString());
                                 }
                             }
                         }
@@ -240,6 +247,15 @@ namespace HAServer
                     });
 
                 }
+            }
+
+            private async void closeWSSess(WebSocket mySocket, MQTTServer MQTTSess, string reason)
+            {
+                Logger.LogWarning("Error processing WebSocket, closing session, reason: " + reason);
+                await mySocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Closing WebSocket, reason: " + reason, CancellationToken.None);
+                mySocket.Dispose();
+                MQTTSess = null;
+                clients.TryRemove(mySocket);
             }
 
             // Handle incoming websockets String messages - invalid, drop session.
