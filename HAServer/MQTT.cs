@@ -61,7 +61,8 @@ namespace HAServer
         public List<Byte> buffer;
         public WebSocket websocket;
         public List<Topic> topics;
-        public Timer timeout;
+        public Timer MQTTPingTimeout;
+        public Timer frameTimeout;
 
         static public ILogger Logger = ApplicationLogging.CreateLogger<MQTTServer>();
 
@@ -87,19 +88,88 @@ namespace HAServer
             websocket = webSocket;
             topics = new List<Topic>();
             buffer = new List<Byte>();
-            timeout = new Timer(clientTimeout, null, 1000 * MQTT_CONST.CLIENT_TIMEOUT, 1000 * MQTT_CONST.CLIENT_TIMEOUT);
+            MQTTPingTimeout = new Timer(ClientTimeout, null, 1000 * MQTT_CONST.CLIENT_TIMEOUT, 1000 * MQTT_CONST.CLIENT_TIMEOUT);
+            frameTimeout = new Timer(FrameTimeout, null, 1000 * MQTT_CONST.FRAME_TIMEOUT, 1000 * MQTT_CONST.FRAME_TIMEOUT);
+        }
+
+        // Manage the MQTT frame here assuming multiple websocket frames are sent to make up a MQTT frame, and to extract the frame size to know when a frame is fully received
+        public bool HandleFrame(List<Byte> frameBuf, int receivedCnt)
+        {
+            //TODO: Chech for buffer overruns when extracting string lengths
+
+            if (!connected && control == 0 && frameBuf.ElementAt(0) != (MQTT_CONST.MQTT_MSG_CONNECT_TYPE << 4))  // New session, must be MQTT connect request (1st buffer byte = 16) else the request isn't MQTT
+            {
+                CloseMQTTClient("Incorrect MQTT control request received, aborting session");
+                return false;
+            }
+            else
+            {
+                frameTimeout.Change(Timeout.Infinite, Timeout.Infinite);         // stop frame timer as we have received completed frame
+                for (var i = 0; i < receivedCnt; i++)
+                {
+                    if (!wsFlags.gotLen)                       // Process fixed header to get MQTT control byte and remaining bytes
+                    {
+                        if (wsFlags.bufIndex == 0)
+                        {
+                            control = frameBuf.ElementAt(0);
+                            if ((control >> 4) == MQTT_CONST.MQTT_MSG_PINGREQ_TYPE || (control >> 4) == MQTT_CONST.MQTT_MSG_DISCONNECT_TYPE)  // handle messages with no variable header / payload bytes to receive
+                            {
+                                wsFlags.gotLen = true;
+                                wsFlags.bytesToGet = 1;
+                            }
+                        }
+                        else
+                        {
+                            if (wsFlags.bufIndex < 5)
+                            {
+                                wsFlags.procRemLen += (int)((frameBuf.ElementAt(i) & 127) * wsFlags.lenMult);
+                                wsFlags.lenMult *= 128;
+                                if (frameBuf.ElementAt(i) < 128)          // No more bytes to encode length if value < 128
+                                {
+                                    wsFlags.bytesToGet = wsFlags.procRemLen;
+                                    wsFlags.gotLen = true;
+                                    wsFlags.bufIndex = 0;
+                                }
+                            }
+                            else
+                            {
+                                CloseMQTTClient("Request to receive too many bytes");
+                                return false;
+                            }
+                        }
+                        wsFlags.bufIndex++;
+                    }
+                    else                                // process the rest of the message after the fixed header
+                    {
+                        //TODO: Is it needed to save the buffer into the clioent object????
+                        buffer.AddRange(frameBuf.Skip(i).Take(receivedCnt - i));            // put the remaining buffer into the client object for further processing
+                        wsFlags.bytesToGet = wsFlags.bytesToGet - (receivedCnt - i);
+                        if (wsFlags.bytesToGet < 0)
+                        {
+                            CloseMQTTClient("Incorrect number of bytes received");
+                            return false;
+                        }
+
+                        if (wsFlags.bytesToGet == 0)           // received all the frame
+                        {
+                            //Console.WriteLine("to get: " + wsFlags.bytesToGet);
+                            if (wsFlags.bytesToGet == 0) HandleWSBinMsg();
+                        }
+                        break;                  // exit loop
+                    }
+                }
+            }
+            return true;
         }
 
         // Handle incoming websockets Binary messages as MQTT
+        //TODO: Make this a generic MQTT protocol handler so other network stacks can use it.
         public bool HandleWSBinMsg()
         {
-            // process protocol fixed header to find length of frame, handle MQTT frame being split across multiple messages
-            //TODO: Timer if completed frame isn't received on time
             //TODO: Chech for buffer overruns when extracting string lengths
-            //TODO: Support for v3.1
-            //TODO: rest keepalive timer for this client
 
             int bufIndex = 0;
+
             switch (control >> 4)
             {
                 case MQTT_CONST.MQTT_MSG_CONNECT_TYPE:
@@ -214,36 +284,40 @@ namespace HAServer
                     }
                     var pubMsg = buffer.Skip(bufIndex).ToList<Byte>();                   // remaining bytes is the publish message (binary form not text)
 
-                    var dataHA = new ASCIIEncoding().GetString(pubMsg.ToArray());
-                    List<String> topicHA = new List<String>(pubTopic.Split('\\'));
-                    if (topicHA.Count != 4)
+                    var pubDataHA = new ASCIIEncoding().GetString(pubMsg.ToArray());
+                    List<String> pubTopicHA = new List<String>(pubTopic.Split('\\'));
+
+                    // Only publish valid HA format
+                    if (pubTopicHA.Count == 4)
                     {
-                        CloseMQTTClient("Incorrect topic specified: " + pubTopic);
-                        return false;
+                        if (Core._debug) Logger.LogDebug("Client [" + IPAddr + "] published topic: " + pubTopic + " Data: " + pubDataHA);
+                        Core.pubSub.Publish(new Interfaces.ChannelKey
+                        {
+                            network = Commons.Globals.networkName,
+                            category = pubTopicHA[0],
+                            className = pubTopicHA[1],
+                            instance = pubTopicHA[2],
+                        }, pubTopicHA[3], pubDataHA);
+
+                        if (pubFlags.QoS == MQTT_CONST.QOS_LEVEL_AT_LEAST_ONCE)
+                        {
+                            MQTTSend(new List<byte> { MQTT_CONST.MQTT_MSG_PUBACK_TYPE << 4, MQTT_CONST.MSG_ACK_LEN, pubIDMSB, pubIDLSB });
+                        }
+                        if (pubFlags.QoS == MQTT_CONST.QOS_LEVEL_EXACTLY_ONCE)
+                        {
+                            MQTTSend(new List<byte> { MQTT_CONST.MQTT_MSG_PUBREC_TYPE << 4, MQTT_CONST.MSG_ACK_LEN, pubIDMSB, pubIDLSB });
+                            waitOnPubRel = (ushort)(pubIDMSB * 256 + pubIDLSB);
+                            //TODO: Set a state machine so that we are waiting for a pubrel from the client
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogWarning("Client [" + IPAddr + "] specified incorrect topic: " + pubTopic + ", not published");
                     }
 
                     //TODO: retain logic for storing messages
                     //TODO: Submit to queue, check that this client can submit to the queue, else close the connection
 
-                    if (Core._debug) Logger.LogDebug("Client [" + IPAddr + "] published topic: " + pubTopic + " Data: " + dataHA );
-                    Core.pubSub.Publish(new Interfaces.ChannelKey
-                    {
-                        network = Commons.Globals.networkName,
-                        category = topicHA[0],
-                        className = topicHA[1],
-                        instance = topicHA[2],
-                    }, topicHA[3], dataHA);
-
-                    if (pubFlags.QoS == MQTT_CONST.QOS_LEVEL_AT_LEAST_ONCE)
-                    {
-                        MQTTSend(new List<byte> { MQTT_CONST.MQTT_MSG_PUBACK_TYPE << 4, MQTT_CONST.MSG_ACK_LEN, pubIDMSB, pubIDLSB });
-                    }
-                    if (pubFlags.QoS == MQTT_CONST.QOS_LEVEL_EXACTLY_ONCE)
-                    {
-                        MQTTSend(new List<byte> { MQTT_CONST.MQTT_MSG_PUBREC_TYPE << 4, MQTT_CONST.MSG_ACK_LEN, pubIDMSB, pubIDLSB });
-                        waitOnPubRel = (ushort)(pubIDMSB * 256 + pubIDLSB);
-                        //TODO: Set a state machine so that we are waiting for a pubrel from the client
-                    }
                     break;
 
                 case MQTT_CONST.MQTT_MSG_PUBREL_TYPE:
@@ -273,29 +347,38 @@ namespace HAServer
                     var subRegRes = new List<Byte>();
                     while (bufIndex < buffer.Count)                                         // Save topics subscribed to and their QoS
                     {
-                        var topic = new Topic
+                        var subTopic = new Topic
                         {
                             topicName = GetUTF8(ref buffer, ref bufIndex),
                             qos = buffer.ElementAt(bufIndex++)
                         };
                         //TODO: Register subscription, remove earlier subscriptions to the same topic, test for QoS > 2, or null topic
-                        if (true)
+                        if (true)               // TODO: Check that server accepts QoS level
                         {
-                            subRegRes.Add(0);
-                            topics.Add(topic);
-                            if (Core._debug) Logger.LogDebug("Client [" + IPAddr + "] requested subscription to " + topic.topicName);
+                            topics.Add(subTopic);
+                            List<String> subTopicHA = new List<String>(subTopic.topicName.Split('\\'));
+                            if (subTopicHA.Count == 3 || subTopicHA.Count == 4)
+                            {
+                                subRegRes.Add((byte)subTopic.qos);
+                                if (Core._debug) Logger.LogDebug("Client [" + IPAddr + "] requested subscription to " + subTopic.topicName);
+                                Core.pubSub.Subscribe(IPAddr, new Interfaces.ChannelKey
+                                {
+                                    network = Commons.Globals.networkName,
+                                    category = subTopicHA[0],
+                                    className = subTopicHA[1],
+                                    instance = subTopicHA[2]
+                                });
+                            }
+                            else
+                            {
+                                subRegRes.Add(MQTT_CONST.QOS_LEVEL_GRANTED_FAILURE);
+                                Logger.LogWarning("Client [" + IPAddr + "] specified incorrect topic: " + subTopic.topicName + ", not subscribed");
+                            }
                         }
                         else
                         {
                             subRegRes.Add(MQTT_CONST.QOS_LEVEL_GRANTED_FAILURE);
                         }
-                        Core.pubSub.Subscribe(IPAddr, new Interfaces.ChannelKey
-                        {
-                            network = Commons.Globals.networkName,
-                            className = ""
-                        });
-
-
                     }
 
                     List<Byte> subAck = new List<byte> { MQTT_CONST.MQTT_MSG_SUBACK_TYPE << 4, (byte)(2 + subRegRes.Count), subIDMSB, subIDMSB};
@@ -357,10 +440,15 @@ namespace HAServer
             waitOnPubRel = 0;
             numFrames++;
             buffer = new List<byte>();
-            timeout.Change(1000 * MQTT_CONST.CLIENT_TIMEOUT, 1000 * MQTT_CONST.CLIENT_TIMEOUT);         // reset timeout
+            MQTTPingTimeout.Change(1000 * MQTT_CONST.CLIENT_TIMEOUT, 1000 * MQTT_CONST.CLIENT_TIMEOUT);         // reset timeout
         }
 
-        private void clientTimeout(Object stateInfo)
+        private void FrameTimeout(Object stateInfo)
+        {
+            CloseMQTTClient("MQTT WebSockets frame timed out");
+        }
+
+        private void ClientTimeout(Object stateInfo)
         {
             CloseMQTTClient("Client timed out");
         }
@@ -368,7 +456,7 @@ namespace HAServer
         // Close client MQTT session
         public async void CloseMQTTClient(string reason)
         {
-            Logger.LogInformation("Closing MQTT session: " + reason);
+            Logger.LogInformation("Closing MQTT session for client [" + name + "], reason: " + reason);
             await websocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, reason, CancellationToken.None);
             websocket.Dispose();
             //TODO: Remove from client array and dispose object
@@ -392,6 +480,7 @@ namespace HAServer
         // Misc
         internal const byte MSG_FLAG_BITS_MASK = 0b00001111;
         internal const int CLIENT_TIMEOUT = 20;         // number of seconds to timeout since client last sent message
+        internal const int FRAME_TIMEOUT = 5;         // full WS MQTT frame not received
         internal const byte MSG_ACK_LEN = 2;
         internal const byte QOS_LEVEL_GRANTED_FAILURE = 0x80;
 

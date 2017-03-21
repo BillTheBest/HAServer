@@ -11,13 +11,13 @@ this is a test<br/>
     <script>
         //var client = mqtt.connect('ws://test.mosquitto.org:8080/HAclient')
 
-        var client = mqtt.connect('ws://192.168.0.112:80/HAclient', { keepalive: 10 })
+        var client = mqtt.connect('ws://localhost/HAclient', { keepalive: 10 })
         document.getElementById("status").innerText = "connecting"
 
         client.on('connect', function () {
             document.getElementById("status").innerText = "connectedd"
-            client.subscribe({ 'test1': 0, 'test2': 1 });
-                client.publish('LIGHTING\\CBUS\\BEDCOCOON\\VALUE', '50')
+            client.subscribe({ 'LIGHTING\\CBUS\\MASTERCOCOON': 0, 'test2': 1 });
+                client.publish('LIGHTING\\CBUS\\MASTERCOCOON\VALUE', '50')
             })
 
         client.on('message', function (topic, message) {

@@ -74,7 +74,7 @@ namespace HAServer
         {
             // This method gets called by the runtime. Use this method to add services to the container.
             // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
-            public const int RECV_BUFF_SIZE = 1024;     // ??? Is this enough??
+            public const int RECV_BUFF_SIZE = 64;     // <List> will increase dynamically when needed
 
             //public ConcurrentBag<WebSocket> clients = new ConcurrentBag<WebSocket>();
             public ConcurrentDictionary<string, MQTTServer> clients = new ConcurrentDictionary<string, MQTTServer>();
@@ -144,7 +144,7 @@ namespace HAServer
                                             break;
 
                                         case WebSocketMessageType.Binary:                   // MQTT messages
-                                            var bufList = new List<Byte>();
+                                            var bufList = new List<Byte>(buffer);
                                             if (!received.EndOfMessage)                     // Optimise performance for smaller messages
                                             {
                                                 var recvCnt = received.Count;
@@ -162,12 +162,12 @@ namespace HAServer
                                                 var sb1 = new StringBuilder();
                                                 var decoder1 = Encoding.UTF8.GetDecoder();
                                                 var charbuffer1 = new Char[1024];                            // TODO: Check buffer size for large sends
-                                                var charLen = decoder1.GetChars(buffer.Array, 0, received.Count, charbuffer1, 0);
+                                                var charLen = decoder1.GetChars(bufList.ToArray(), 0, received.Count, charbuffer1, 0);
 
                                                 sb1.Append("[");
                                                 for (var i = 0; i < received.Count; i++)
                                                 {
-                                                    sb1.Append(buffer.ElementAt(i).ToString() + ",");
+                                                    sb1.Append(bufList.ElementAt(i).ToString() + ",");
                                                 }
                                                 sb1.Append("] -");
                                                 sb1.Append(charbuffer1, 0, received.Count);
@@ -175,77 +175,15 @@ namespace HAServer
                                                 Logger.LogDebug("WS recv [" + myClient.IPAddr + "] " + sb1.ToString());
                                             }
 
-                                            //TODO: Timer if completed frame isn't received on time
-                                            //TODO: Chech for buffer overruns when extracting string lengths
-
-                                            // Manage the MQTT frame here assuming multiple websocket frames are sent to make up a MQTT frame, and to extract the frame size to know when a frame is fully received
-                                            if (!myClient.connected && myClient.control == 0 && buffer.ElementAt(0) != (MQTT_CONST.MQTT_MSG_CONNECT_TYPE << 4))  // New session, must be MQTT connect request (1st buffer byte = 16) else the request isn't MQTT
+                                            if (myClient.HandleFrame(bufList, received.Count) && myClient.connected && myClient.numFrames == 1)   // process frame
                                             {
-                                                await webSocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Not MQTT connect request", CancellationToken.None);
-                                                webSocket.Dispose();
-                                                break;
-                                            }
-                                            for (var i = 0; i < received.Count; i++)
-                                            {
-                                                if (!myClient.wsFlags.gotLen)                       // Process fixed header to get MQTT control byte and remaining bytes
+                                                var addCnt = 0;                // Add to clients list if new session, allow for multiple sessions from same IP.
+                                                do
                                                 {
-                                                    if (myClient.wsFlags.bufIndex == 0)
-                                                    {
-                                                        myClient.control = buffer.ElementAt(0);
-                                                        if ((myClient.control >> 4) == MQTT_CONST.MQTT_MSG_PINGREQ_TYPE || (myClient.control >> 4) == MQTT_CONST.MQTT_MSG_DISCONNECT_TYPE)  // handle messages with no variable header / payload bytes to receive
-                                                        {
-                                                            myClient.wsFlags.gotLen = true;
-                                                            myClient.wsFlags.bytesToGet = 1;
-                                                        }
-                                                    }
-                                                    else
-                                                    {
-                                                        if (myClient.wsFlags.bufIndex < 5)
-                                                        {
-                                                            myClient.wsFlags.procRemLen += (int)((buffer.ElementAt(i) & 127) * myClient.wsFlags.lenMult);
-                                                            myClient.wsFlags.lenMult *= 128;
-                                                            if (buffer.ElementAt(i) < 128)          // No more bytes to encode length if value < 128
-                                                            {
-                                                                myClient.wsFlags.bytesToGet = myClient.wsFlags.procRemLen;
-                                                                myClient.wsFlags.gotLen = true;
-                                                                myClient.wsFlags.bufIndex = 0;
-                                                            }
-                                                        }
-                                                        else
-                                                        {
-                                                            // TODO: invalid
-                                                            break;
-                                                        }
-                                                    }
-                                                    myClient.wsFlags.bufIndex++;
-                                                }
-                                                else                                // process the rest of the message after the fixed header
-                                                {
-                                                    myClient.buffer.AddRange(buffer.Skip(i).Take(received.Count - i));            // put the remaining buffer into the client object for further processing
-                                                    myClient.wsFlags.bytesToGet = myClient.wsFlags.bytesToGet - (received.Count - i);
-                                                    if (myClient.wsFlags.bytesToGet < 0)
-                                                    {
-                                                        myClient.CloseMQTTClient("Incorrect number of bytes received");
-                                                    }
-
-                                                    if (myClient.wsFlags.bytesToGet == 0)           // received all the frame
-                                                    {
-                                                        //Console.WriteLine("to get: " + myClient.wsFlags.bytesToGet);
-                                                        if (myClient.wsFlags.bytesToGet == 0) myClient.HandleWSBinMsg();
-
-                                                        if (myClient.connected && myClient.numFrames == 1)     // New session, save
-                                                        {
-                                                            var addCnt = 0;                // Add to clients list, allow for multiple sessions from same IP.
-                                                            do
-                                                            {
-                                                                myClient.name = myClient.IPAddr + "_" + addCnt;
-                                                                addCnt++;
-                                                            } while (!clients.TryAdd(myClient.name, myClient));
-                                                        }
-                                                    }
-                                                    break;                  // exit loop
-                                                }
-                                            }
+                                                    myClient.name = myClient.IPAddr + "_" + addCnt;
+                                                    addCnt++;
+                                                } while (!clients.TryAdd(myClient.name, myClient));
+                                            };
                                             break;
 
                                         case WebSocketMessageType.Close:
@@ -255,7 +193,7 @@ namespace HAServer
                                 }
                                 catch (Exception ex)
                                 {
-                                    //TODO: Log error
+                                    Logger.LogError("WebSockets frame error occured: " + ex.ToString());
                                     await webSocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "MQTT Exception raised: " + ex.ToString(), CancellationToken.None);
                                     webSocket.Dispose();
                                 }
