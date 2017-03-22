@@ -12,6 +12,7 @@ using System.Text;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Collections.Generic;
+using System.Collections;
 
 // NOTES: Deebug with the name of the program not IISExpress in the debug play button, this runs .NET ASP in a console so uses Krestrel not IIS
 // Set launchsettings.json to the port you want to launch from, and if you want a browser automatically launched or not, and specify the port in .UseUrls("http://*:80)
@@ -191,18 +192,18 @@ namespace HAServer
                                             }
                                             else           // Error in processing frame, drop session
                                             {
-                                                closeWSSess(webSocket, "Error processing MQTT frame, session closed");
+                                                closeWSSess(webSocket, myClient, "Error processing MQTT frame, session closed");
                                             }
                                             break;
 
                                         case WebSocketMessageType.Close:
-                                            closeWSSess(webSocket, "Client closed WebSocket, reason: " + received.CloseStatus.ToString() + " " + received.CloseStatusDescription.ToString());
+                                            closeWSSess(webSocket, myClient, "Client closed WebSocket, reason: " + received.CloseStatus.ToString() + " " + received.CloseStatusDescription.ToString());
                                             break;
                                     }
                                 }
                                 catch (Exception ex)
                                 {
-                                    closeWSSess(webSocket, ex.ToString());
+                                    closeWSSess(webSocket, myClient, ex.ToString());
                                 }
                             }
                         }
@@ -255,7 +256,7 @@ namespace HAServer
                 await mySocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Closing WebSocket, reason: " + reason, CancellationToken.None);
                 mySocket.Dispose();
                 MQTTSess = null;
-                clients.TryRemove(mySocket);
+                ((IDictionary)clients).Remove(MQTTSess.name);
             }
 
             // Handle incoming websockets String messages - invalid, drop session.
