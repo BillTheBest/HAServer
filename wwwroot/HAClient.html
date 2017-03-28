@@ -6,39 +6,31 @@
 <body id="body">
 <P> wwroot file </P>
 this is a test<br/>
-    <div id="status"></div>
-    <script src="mqtt.min.js"></script>
+    <div id="status">State: Closed</div>
+    <div id="recv">Recv: -</div>
+    <script src="mqtt.js"></script>
     <script>
         //var client = mqtt.connect('ws://test.mosquitto.org:8080/HAclient')
 
-        var client = mqtt.connect('ws://localhost/HAclient', { keepalive: 10 })
-        document.getElementById("status").innerText = "connecting"
+        var client = mqtt.connect("ws://" + document.domain + "/HAclient", { keepalive: 10 })
+        document.getElementById("status").innerText = "State: Connecting"
 
         client.on('connect', function () {
-            document.getElementById("status").innerText = "connectedd"
-            client.subscribe({ 'LIGHTING\\CBUS\\MASTERCOCOON': 0, 'test2': 1 });
-                client.publish('LIGHTING\\CBUS\\MASTERCOCOON\VALUE', '50')
+            document.getElementById("status").innerText = "State: Connected"
+            client.subscribe({ 'LIGHTING\\CBUS\\MASTERCOCOON': 0});
+                client.publish('LIGHTING\\CBUS\\MASTERCOCOON\\VALUE', '50')
             })
 
         client.on('message', function (topic, message) {
             // message is Buffer
-            document.getElementById("status").innerText = "topic '" + topic + "' msg received: " + message
+            document.getElementById("recv").innerText = "Recv: Topic(" + topic + ") Data(" + message + ")";
             console.log(message.toString())
-            client.end()
         })
 
         client.on('close', function () {
-            document.getElementById("status").innerText = "closed"
+            document.getElementById("status").innerText = "State: Closed"
         })
 
-        /*var ws = new WebSocket("ws://localhost:80/HAclient");
-        client.onopen = function () {
-            alert("connected");
-        }
-
-        ws.onmessage = function (evt) {
-            alert("Msg: " + evt.data);
-        } */
     </script>
 </body>
 </html>

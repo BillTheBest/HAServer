@@ -50,7 +50,7 @@ namespace HAServer
                                 if (extCfg.GetSection("ExtensionCfg:Enabled").Value != null && extCfg.GetSection("ExtensionCfg:Enabled").Value.ToUpper() == "TRUE")
                                 {
                                     Logger.LogInformation("Extension " + extName + " (" + extCfg.GetSection("ExtensionCfg:Desc").Value + ") enabled, loading...");
-                                    Core.pubSub.AddUserToAccessGroup("EXTENSIONS", "Extensions." + extName);                                // Add to EXTENSIONS access group for pubsub
+                                    Core.pubSub.AddUserToAccessGroup("EXTENSIONS", "Extension." + extName);                                // Add to EXTENSIONS access group for pubsub
                                     var myAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
                                     var extType = myAssembly.GetType(extName + "." + extName);          
                                     if (extType != null)

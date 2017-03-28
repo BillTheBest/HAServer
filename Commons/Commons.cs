@@ -32,6 +32,15 @@ namespace Interfaces
         /// <param name="channel">The channel to subscribe to (and any children)</param>
         int Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
 
+        /// <summary> 
+        /// Unsubscribe to a specific channel. 
+        /// 
+        /// Remove client from list of channel subscribers
+        /// </summary> 
+        /// <param name="clientName">The name of the requesting client</param> 
+        /// <param name="channel">The channel to subscribe to (and any children)</param>
+        int UnSubscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "");
+
         void Publish(ChannelKey channel, string scope, string data);
 
         string GetIniSection(string section, [CallerFilePath] string caller = "");

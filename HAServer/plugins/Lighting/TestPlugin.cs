@@ -27,6 +27,9 @@ namespace TestPlugin
                 // TODO: Maybe use callername instead of hard coding plugin name
                 _channel.instance = "JulieWIR";
                 _host.Publish(_channel, "value", "100");
+                _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" });
+                _host.UnSubscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" });
+
                 _host.WriteLog(LOGTYPES.INFORMATION, "From Test plugin");
                 return "OK";
             }

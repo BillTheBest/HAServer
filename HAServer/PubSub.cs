@@ -13,6 +13,7 @@ using System.Linq;
 //clients are <plugin/extension.clientname>
 //TODO: Persist user group table to file and secure it, modify access via admin UI
 //TODO: Put /// comments on all public external methods
+//TODO: Implement groups
 
 // Client access permissions to a channel are applied at subscribe time. The channel 'auth' property has a list of groups & access for that group (R, RW). 
 // THere is a separate user group table 'clientGroups' that has the clientname and the list of groups the client is allocated to. 
@@ -81,6 +82,9 @@ namespace HAServer
                                         case "CORE":
                                             //Core.RouteMessage(client.name, HAMessage);
                                             break;
+                                        case "MQTT":
+                                            Core.webServices.RouteMessage(clientRoute[1], HAMessage);
+                                            break;
                                         default:
                                             Logger.LogError("Can't route message " + HAMessage.instance + "\\" + HAMessage.instance + "\\" + HAMessage.instance + " to " + client.name);
                                             break;
@@ -94,57 +98,7 @@ namespace HAServer
                     }
                 }, TaskCreationOptions.LongRunning);
 
-                // Setup access groups
-                clientGroups["EXTENSIONS"] = new List<string>();
-                //-------
-                // Test
-                clientGroups["ADMINS"] = new List<string> { "PubSub.myClient", "Extensions.Rules" };
-
-                AddUpdChannel("Rules", new ChannelKey
-                {
-                    network = Globals.networkName,
-                    category = "LIGHTING",
-                    className = "CBUS",
-                    instance = "MASTERCOCOON"
-                }, new ChannelSub
-                {
-                    auth = new List<AccessAttribs>
- {
- new AccessAttribs
- {
- name = "ADMINS",
- access = "RW"
- },
- new AccessAttribs
- {
- name = "EXTENSIONS",
- access = "RW"
- }
- }
-                }, "Extensions");           // Test route to extensions
-
-                AddUpdChannel("Rules", new ChannelKey
-                {
-                    network = "Another Network",
-                    category = "LIGHTING",
-                    className = "CBUS",
-                    instance = "HALLWAY"
-                }, new ChannelSub
-                {
-                    auth = new List<AccessAttribs>
- {
- new AccessAttribs
- {
- name = "ADMINS",
- access = "RW"
- },
- new AccessAttribs
- {
- name = "EXTENSIONS",
- access = "RW"
- }
- }
-                }, "Extensions");
+                testAccessSetup();          // TESTING 
 
                 _serviceState = Consts.ServiceState.RUNNING;
             }
@@ -229,10 +183,12 @@ namespace HAServer
         // Subscribe to channel for Ext/Plug.Client. Return null if channel does not exist else return the number of channels the request was granted a subscription
         public int Subscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "")
         {
+            int numSubscribed = 0;
             string clientAccess;
             var fullClientName = Path.GetFileNameWithoutExtension(caller) + "." + clientName;
-            //if (!channels.Keys.Contains(channel)) subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added if the channel isn't established now
-            subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added including wildcards
+            //if (!channels.Keys.Contains(channel)) subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added if the channel isn't established now
+            //TODO: FAR TOO MANY SUBREQUESTS
+            subRequests.Add(new SubRequests { clientName = clientName, channelKey = channel, caller = caller });  // Save subscription request to add to any future channels added including wildcards
 
             var subKeys = channels.Keys;                                                                   // Filter keys so that wildcard "" (ALL) is catered for.
             if (channel.network != "") subKeys = subKeys.Where(x => x.network == channel.network).ToList();
@@ -249,7 +205,7 @@ namespace HAServer
                 {
                     if (clientGroups.TryGetValue(subGroup.name, out var clientGroup))                                   // Lookup clients associated with group
                     {
-                        if (clientGroup.Contains(fullClientName))
+                        if (clientGroup.Contains(fullClientName) || clientGroup.Contains(Path.GetFileNameWithoutExtension(caller) + ".*"))      // also check for wildcards as clientname
                         {
                             clientAccess = subGroup.access;
                             if (subGroup.access == "RW") break;                                         // RW access takes precidence if user is a member of multiple groups
@@ -275,9 +231,29 @@ namespace HAServer
                         subscription.clients.Add(newAccess);                                        // Add if new
                     }
                     channels[channel] = subscription;                                          // Update subscription with new client access info
+                    numSubscribed++;
                 }
             }
-            return subKeys.Count;
+            return numSubscribed;
+        }
+
+        // remove client subscription from channel
+        public int UnSubscribe(string clientName, ChannelKey channel, [CallerFilePath] string caller = "")
+        {
+            int numSubscribed = 0;
+            var fullClientName = Path.GetFileNameWithoutExtension(caller) + "." + clientName;
+
+            var subKeys = channels.Keys;                                                                   // Filter keys so that wildcard "" (ALL) is catered for.
+            if (channel.network != "") subKeys = subKeys.Where(x => x.network == channel.network).ToList();
+            if (channel.category != "") subKeys = subKeys.Where(x => x.category == channel.category).ToList();
+            if (channel.className != "") subKeys = subKeys.Where(x => x.className == channel.className).ToList();
+            if (channel.instance != "") subKeys = subKeys.Where(x => x.instance == channel.instance).ToList();
+
+            foreach (var subKey in subKeys)                                                              // Loop through all channels that match subscription request
+            {
+                numSubscribed += channels[subKey].clients.RemoveAll(x => x.name == fullClientName);
+            }
+            return numSubscribed;
         }
 
         // Get values from extension ini file
@@ -316,6 +292,68 @@ namespace HAServer
         // Any shutdown code
         public void Shutdown()
         {
+        }
+
+        // TESTING ONLY
+        private void testAccessSetup()
+        {
+            // Setup access groups
+            clientGroups["EXTENSIONS"] = new List<string>();
+            //-------
+            // Test
+            clientGroups["ADMINS"] = new List<string> { "PubSub.myClient", "Extensions.Rules" };
+            clientGroups["MQTT"] = new List<string> { "MQTT.*"};
+
+            AddUpdChannel("Rules", new ChannelKey
+            {
+                network = Globals.networkName,
+                category = "LIGHTING",
+                className = "CBUS",
+                instance = "MASTERCOCOON"
+            }, new ChannelSub
+            {
+                auth = new List<AccessAttribs>
+                {
+                    new AccessAttribs
+                    {
+                        name = "ADMINS",
+                        access = "RW"
+                    },
+                    new AccessAttribs
+                    {
+                        name = "EXTENSIONS",
+                        access = "RW"
+                    },
+                    new AccessAttribs
+                    {
+                        name = "MQTT",
+                        access = "RW"
+                    }
+                }
+            }, "Extensions");           // Test route to extensions
+
+            AddUpdChannel("Rules", new ChannelKey
+            {
+                network = "Another Network",
+                category = "LIGHTING",
+                className = "CBUS",
+                instance = "HALLWAY"
+            }, new ChannelSub
+            {
+                auth = new List<AccessAttribs>
+                {
+                    new AccessAttribs
+                    {
+                        name = "ADMINS",
+                        access = "RW"
+                    },
+                    new AccessAttribs
+                    {
+                        name = "EXTENSIONS",
+                        access = "RW"
+                    }
+                }
+            }, "Extensions");
         }
 
     }

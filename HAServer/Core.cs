@@ -35,7 +35,7 @@ namespace HAServer
         public static PubSub pubSub;
         public static Extensions extensions;
         private static Plugins plugins;
-        private static WebServices webServices;
+        public static WebServices webServices;
         //private static Database sqldb;
         public static TimeSeries timeSeries;
 
@@ -144,8 +144,6 @@ namespace HAServer
             }
 
             Logger.LogInformation("HA Console startup completed. Press 'X' to exit console.");
-
-            //pubSub.SetServerState(Consts.ServiceState.RUNNING);                                 // Start message queue
 
             // Block waiting on key input, looping until 'X' is pressed, or console shutdown (shutdown caught by closehandler)
             ConsoleKey cki = 0;

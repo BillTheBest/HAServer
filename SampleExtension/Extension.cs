@@ -33,8 +33,10 @@ namespace SampleExtension
         {
             try
             {
-                _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON"}, "SampleExtension");
+                _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON"});
+                _host.UnSubscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" });
                 _host.Subscribe("SampleExtension", new ChannelKey { network = Commons.Globals.networkName, category = "SYSTEM", className = "RULES", instance = "ACTIONS" });
+
                 System.Threading.Thread.Sleep(2000);
                 _host.Publish(new ChannelKey
                 {
@@ -49,10 +51,11 @@ namespace SampleExtension
 
                 Task.Factory.StartNew(() =>
                 {
+                    var t = 0;
                     while(true)
                     {
                         System.Threading.Thread.Sleep(10000);
-                        _host.Publish(new ChannelKey { network = "31 Needham", category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" }, "MYSCOPE", "MYDATA");
+                        _host.Publish(new ChannelKey { network = "31 Needham", category = "LIGHTING", className = "CBUS", instance = "MASTERCOCOON" }, "MYSCOPE", t++.ToString());
                     }
                 });
 

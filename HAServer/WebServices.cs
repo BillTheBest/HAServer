@@ -13,6 +13,8 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Collections.Generic;
 using System.Collections;
+using Interfaces;
+using System.Threading.Tasks;
 
 // NOTES: Deebug with the name of the program not IISExpress in the debug play button, this runs .NET ASP in a console so uses Krestrel not IIS
 // Set launchsettings.json to the port you want to launch from, and if you want a browser automatically launched or not, and specify the port in .UseUrls("http://*:80)
@@ -28,6 +30,8 @@ namespace HAServer
 {
     public class WebServices
     {
+        public static ConcurrentDictionary<string, MQTTServer> clients = new ConcurrentDictionary<string, MQTTServer>();
+
         static public ILogger Logger = ApplicationLogging.CreateLogger<WebServices>();
 
         public WebServices(string port, string filesLoc)
@@ -73,14 +77,29 @@ namespace HAServer
         {
         }
 
+        public void RouteMessage(string client, Commons.HAMessage myMessage)
+        {
+            if (WebServices.clients.ContainsKey(client))
+            {
+                if (WebServices.clients[client].websocket != null || WebServices.clients[client].socket != null)                // Websockets or sockets
+                {
+                    WebServices.clients[client].MQTTPublish(myMessage.category + "\\" + myMessage.className + "\\" + myMessage.instance + "\\" + myMessage.scope, myMessage.data, 0);
+                }
+                else
+                {
+                    Logger.LogError("Trying to send message to client " + client + " but no active websocket or socket open with client");
+                }
+            }
+            else
+            {
+                Logger.LogError("Trying to send message to client " + client + " but no client session registered");
+            }
+        }
+
         public class WebServerConfig
         {
             // This method gets called by the runtime. Use this method to add services to the container.
             // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
-            public const int RECV_BUFF_SIZE = 64;     // <List> will increase dynamically when needed
-
-            //public ConcurrentBag<WebSocket> clients = new ConcurrentBag<WebSocket>();
-            public ConcurrentDictionary<string, MQTTServer> clients = new ConcurrentDictionary<string, MQTTServer>();
 
             public void ConfigureServices(IServiceCollection services)
             {
@@ -113,110 +132,10 @@ namespace HAServer
 
                 app.UseWebSockets(new WebSocketOptions()    // Uses same port as http
                 {
-                    ReceiveBufferSize = RECV_BUFF_SIZE,
+                    //ReceiveBufferSize = RECV_BUFF_SIZE,
                     KeepAliveInterval = TimeSpan.FromMinutes(2)
                 });
-
-                app.Use(async (http, next) =>
-                {
-                    if (http.WebSockets.IsWebSocketRequest)
-                    {
-                        var webSocket = await http.WebSockets.AcceptWebSocketAsync();
-                        if (http.WebSockets.WebSocketRequestedProtocols[0].ToString().ToUpper() == "MQTT")
-                        {
-                            Logger.LogDebug("Received new MQTT WebSocket connection from " + http.Connection.RemoteIpAddress);
-                            MQTTServer myClient = new MQTTServer(webSocket, http.Connection.RemoteIpAddress.ToString(), http.Connection.RemotePort.ToString());
-
-                            //Console.WriteLine("-------------------------------------------------------> WS thread: " + System.Threading.Thread.CurrentThread.ManagedThreadId);
-
-                            // Get MQTT frame
-                            while (webSocket != null && webSocket.State == System.Net.WebSockets.WebSocketState.Open)
-                            {
-
-                                //TODO: Tune the buffer size for typical HAServer messages received (smaller than 4096 but is 4096 the normal frame size on the network?)
-                                var buffer = new ArraySegment<Byte>(new Byte[RECV_BUFF_SIZE]);
-                                try
-                                {
-                                    var received = await webSocket.ReceiveAsync(buffer, System.Threading.CancellationToken.None);
-
-                                    switch (received.MessageType)
-                                    {
-                                        case WebSocketMessageType.Text:     // Don't accept text websockets
-                                            await webSocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Not accepting text requests", CancellationToken.None);
-                                            webSocket.Dispose();
-                                            break;
-
-                                        case WebSocketMessageType.Binary:                   // MQTT messages
-                                            var bufList = new List<Byte>(buffer);
-                                            if (!received.EndOfMessage)                     // Optimise performance for smaller messages
-                                            {
-                                                var recvCnt = received.Count;
-                                                bufList.AddRange(buffer);
-                                                while (!received.EndOfMessage)              // Get further messages
-                                                {
-                                                    received = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
-                                                    bufList.AddRange(buffer);
-                                                    recvCnt = recvCnt + received.Count;
-                                                }
-                                            }
-
-                                            if (Core._debug)
-                                            {
-                                                var sb1 = new StringBuilder();
-                                                var decoder1 = Encoding.UTF8.GetDecoder();
-                                                var charbuffer1 = new Char[1024];                            // TODO: Check buffer size for large sends
-                                                var charLen = decoder1.GetChars(bufList.ToArray(), 0, received.Count, charbuffer1, 0);
-
-                                                sb1.Append("[");
-                                                for (var i = 0; i < received.Count; i++)
-                                                {
-                                                    sb1.Append(bufList.ElementAt(i).ToString() + ",");
-                                                }
-                                                sb1.Append("] -");
-                                                sb1.Append(charbuffer1, 0, received.Count);
-                                                sb1.Append("-");
-                                                Logger.LogDebug("WS recv [" + myClient.IPAddr + "] " + sb1.ToString());
-                                            }
-
-                                            if (myClient.HandleFrame(bufList, received.Count) && myClient.connected && myClient.numFrames == 1)   // process frame
-                                            {
-                                                if (myClient.connected && myClient.numFrames == 1)
-                                                {
-                                                    var addCnt = 0;                // Add to clients list if new session, allow for multiple sessions from same IP.
-                                                    do
-                                                    {
-                                                        myClient.name = myClient.IPAddr + "_" + addCnt;
-                                                        addCnt++;
-                                                    } while (!clients.TryAdd(myClient.name, myClient));
-                                                }
-                                            }
-                                            else           // Error in processing frame, drop session
-                                            {
-                                                closeWSSess(webSocket, myClient, "Error processing MQTT frame, session closed");
-                                            }
-                                            break;
-
-                                        case WebSocketMessageType.Close:
-                                            closeWSSess(webSocket, myClient, "Client closed WebSocket, reason: " + received.CloseStatus.ToString() + " " + received.CloseStatusDescription.ToString());
-                                            break;
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    closeWSSess(webSocket, myClient, ex.ToString());
-                                }
-                            }
-                        }
-                        else
-                        {
-                            Logger.LogWarning("Invalid subprotocol '" + http.WebSockets.WebSocketRequestedProtocols[0].ToString() + "' requested from client [" + http.Connection.RemoteIpAddress.ToString() + "]. Ignored.");
-                        }
-                    }
-                    else
-                    {
-                        await next();                       // Pass to next middleware
-                    }
-                });
+                app.UseMiddleware<WSMiddleware>();
 
                 const string oneYear = "public, max-age=" + "31536000000";                        //86400000L * 365L, use as const for performance
 
@@ -249,30 +168,158 @@ namespace HAServer
 
                 }
             }
+        }
+    }
 
-            private async void closeWSSess(WebSocket mySocket, MQTTServer MQTTSess, string reason)
-            {
-                Logger.LogWarning("Error processing WebSocket, closing session, reason: " + reason);
-                await mySocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Closing WebSocket, reason: " + reason, CancellationToken.None);
-                mySocket.Dispose();
-                MQTTSess = null;
-                ((IDictionary)clients).Remove(MQTTSess.name);
-            }
+    // Handle websockets sessions as middleware
+    public class WSMiddleware
+    {
+        static public ILogger Logger = ApplicationLogging.CreateLogger<WSMiddleware>();
 
-            // Handle incoming websockets String messages - invalid, drop session.
-            private void HandleWSStrMsg(string clientIP, string msg)
-            {
+        public const int RECV_BUFF_SIZE = 64;     // <List> will increase dynamically when needed
 
-            }
+        private readonly RequestDelegate _next;
 
-
-            // Send text out websocket
-            private void SendWSAsync(WebSocket client, string toSend)
-            {
-                client.SendAsync(new ArraySegment<Byte>(Encoding.UTF8.GetBytes(toSend)), WebSocketMessageType.Text, true, CancellationToken.None);
-            }
-
+        public WSMiddleware(RequestDelegate next)
+        {
+            _next = next;
         }
 
+        public async Task Invoke(HttpContext context)
+        {
+            if (context.WebSockets.IsWebSocketRequest)
+            {
+                CancellationToken ct = context.RequestAborted;
+                WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
+
+                MQTTServer MQTTClient = new MQTTServer(webSocket, context.Connection.RemoteIpAddress.ToString(), context.Connection.RemotePort.ToString());
+
+                if (context.WebSockets.WebSocketRequestedProtocols[0].ToString().ToUpper() == "MQTT")
+                {
+                    Logger.LogDebug("Received new MQTT WebSocket connection from " + context.Connection.RemoteIpAddress);
+
+                    // receive loop
+                    while (!ct.IsCancellationRequested && webSocket.State == WebSocketState.Open)
+                    {
+                        var response = await ReceiveBin(MQTTClient, ct);
+                    }
+                }
+                else
+                {
+                    CloseWSSess(MQTTClient, "Invalid subprotocol '" + context.WebSockets.WebSocketRequestedProtocols[0].ToString() + "' requested from client [" + context.Connection.RemoteIpAddress.ToString() + "].");
+                }
+            }
+            else
+            {
+                await _next.Invoke(context);                // Not a web socket request
+            }
+        }
+
+        private static async Task<bool> ReceiveBin(MQTTServer myClient, CancellationToken ct = default(CancellationToken))
+        {
+            var buffer = new ArraySegment<byte>(new byte[RECV_BUFF_SIZE]);
+
+            using (var ms = new MemoryStream())
+            {
+                WebSocketReceiveResult result;
+                do
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    result = await myClient.websocket.ReceiveAsync(buffer, ct);
+                    ms.Write(buffer.Array, buffer.Offset, result.Count);
+                }
+                while (!result.EndOfMessage);
+
+                if (result.Count > 0) myClient.StartFrameTimeout();
+
+                ms.Seek(0, SeekOrigin.Begin);
+
+                if (Core._debug)
+                {
+                    var sb1 = new StringBuilder();
+                    var decoder1 = Encoding.UTF8.GetDecoder();
+                    var charbuffer1 = new Char[1024];                            // TODO: Check buffer size for large sends
+                    var charLen = decoder1.GetChars(ms.ToArray(), 0, (int)ms.Length, charbuffer1, 0);
+
+                    sb1.Append("[");
+                    for (var i = 0; i < (int)ms.Length; i++)
+                    {
+                        sb1.Append(ms.ToArray()[i].ToString() + ",");
+                    }
+                    sb1.Append("] -");
+                    sb1.Append(charbuffer1, 0, (int)ms.Length);
+                    sb1.Append("-");
+                    Logger.LogDebug("WS recv [" + myClient.IPAddr + "] " + sb1.ToString());
+                }
+
+               
+                switch (result.MessageType)
+                {
+                    case WebSocketMessageType.Text:     // Don't accept text websockets
+                        CloseWSSess(myClient, "Not accepting text requests");
+                        return false;
+
+                    case WebSocketMessageType.Binary:                   // MQTT messages
+                        //var st = new System.Diagnostics.Stopwatch();
+                        //st.Start();
+                        //var tt = new List<List<Byte>>();
+                        //for (var t = 0; t < 10000; t++)
+                       // {
+                       //     tt.Add(ms.ToArray().ToList<Byte>());
+                       // }
+                       // Logger.LogCritical(st.ElapsedMilliseconds.ToString());
+
+                        if (myClient.HandleFrame(ms.ToArray().ToList<Byte>(), (int)ms.Length))   // process frame
+                        {
+                            if (myClient.connected && myClient.name == null)
+                            {
+                                var addCnt = 0;                // Add to clients list if new session, allow for multiple sessions from same IP.
+                                do
+                                {
+                                    myClient.name = myClient.IPAddr.Replace('.', '-') + "_" + addCnt;
+                                    addCnt++;
+                                } while (!WebServices.clients.TryAdd(myClient.name, myClient));
+                            }
+                            return true;
+                        }
+                        else           // Error in processing frame, drop session
+                        {
+                            CloseWSSess(myClient, "Error processing MQTT frame, session closed");
+                            return false;
+                        }
+
+                    case WebSocketMessageType.Close:
+                        CloseWSSess(myClient, "Client closed WebSocket, reason: " + result.CloseStatus.ToString() + " " + result.CloseStatusDescription.ToString());
+                        return false;
+                }
+                return false;
+            }
+        }
+
+        // Shut down session and remove MQTT object from clients list
+        private async static void CloseWSSess(MQTTServer MQTTSess, string reason)
+        {
+            try
+            {
+                MQTTSess.CloseMQTTClient("WebSocket closed, reason: " + reason);                // Remove subscriptions
+                if (MQTTSess.websocket.State == WebSocketState.Open)
+                {
+                    await MQTTSess.websocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Closing WebSocket, reason: " + reason, CancellationToken.None);
+                }
+                else
+                {
+                    await MQTTSess.websocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing WebSocket, reason: " + reason, CancellationToken.None);
+                }
+                MQTTSess.websocket.Dispose();
+                WebServices.clients.TryRemove(MQTTSess.name, out MQTTServer notUsed);
+                MQTTSess = null;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Closing WebSocket session, reason: " + ex.ToString());
+                throw;
+            }
+        }
     }
 }
