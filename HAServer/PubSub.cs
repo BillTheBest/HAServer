@@ -36,6 +36,7 @@ namespace HAServer
         // Main message queue
         private static BlockingCollection<Commons.HAMessage> messQ = new BlockingCollection<Commons.HAMessage>();
 
+        // Control state of message queue
         private static Consts.ServiceState _serviceState = Consts.ServiceState.PAUSED;                  // Accept messages but wait for all the services to start before processing
 
         // Save old subscription requests
@@ -82,8 +83,11 @@ namespace HAServer
                                         case "CORE":
                                             //Core.RouteMessage(client.name, HAMessage);
                                             break;
-                                        case "MQTT":
+                                        case "WEBSERVICES":                     // TODO: Make this a generic routine for all extensions not hard coded
                                             Core.webServices.RouteMessage(clientRoute[1], HAMessage);
+                                            break;
+                                        case "SOCKETSERVICES":                     // TODO: Make this a generic routine for all extensions not hard coded
+                                            //Core.webServices.RouteMessage(clientRoute[1], HAMessage);
                                             break;
                                         default:
                                             Logger.LogError("Can't route message " + HAMessage.instance + "\\" + HAMessage.instance + "\\" + HAMessage.instance + " to " + client.name);
@@ -252,6 +256,7 @@ namespace HAServer
             foreach (var subKey in subKeys)                                                              // Loop through all channels that match subscription request
             {
                 numSubscribed += channels[subKey].clients.RemoveAll(x => x.name == fullClientName);
+                if (Core._debug) Logger.LogDebug("Client [" + clientName + "] unsubscribed to " + subKey.category + "\\" + subKey.className + "\\" + subKey.instance);
             }
             return numSubscribed;
         }
@@ -302,7 +307,7 @@ namespace HAServer
             //-------
             // Test
             clientGroups["ADMINS"] = new List<string> { "PubSub.myClient", "Extensions.Rules" };
-            clientGroups["MQTT"] = new List<string> { "MQTT.*"};
+            clientGroups["WebServices"] = new List<string> { "WebServices.*"};            // TODO: Change to MQTT widlcard sytax
 
             AddUpdChannel("Rules", new ChannelKey
             {
@@ -326,7 +331,7 @@ namespace HAServer
                     },
                     new AccessAttribs
                     {
-                        name = "MQTT",
+                        name = "WebServices",
                         access = "RW"
                     }
                 }

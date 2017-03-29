@@ -92,7 +92,14 @@ namespace HAServer
             }
             else
             {
-                Logger.LogError("Trying to send message to client " + client + " but no client session registered");
+                Logger.LogInformation("Trying to send message to client " + client + " but no client network session active, unsubscribing.");
+                Core.pubSub.UnSubscribe(client, new ChannelKey
+                {
+                    network = myMessage.network,
+                    category = myMessage.category,
+                    className = myMessage.className,
+                    instance = myMessage.instance,
+                });
             }
         }
 
@@ -193,6 +200,7 @@ namespace HAServer
                 WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
 
                 MQTTServer MQTTClient = new MQTTServer(webSocket, context.Connection.RemoteIpAddress.ToString(), context.Connection.RemotePort.ToString());
+                MQTTClient.TimeoutEvent += CloseWSSess;
 
                 if (context.WebSockets.WebSocketRequestedProtocols[0].ToString().ToUpper() == "MQTT")
                 {
@@ -253,7 +261,7 @@ namespace HAServer
                     Logger.LogDebug("WS recv [" + myClient.IPAddr + "] " + sb1.ToString());
                 }
 
-               
+
                 switch (result.MessageType)
                 {
                     case WebSocketMessageType.Text:     // Don't accept text websockets
@@ -261,14 +269,14 @@ namespace HAServer
                         return false;
 
                     case WebSocketMessageType.Binary:                   // MQTT messages
-                        //var st = new System.Diagnostics.Stopwatch();
-                        //st.Start();
-                        //var tt = new List<List<Byte>>();
-                        //for (var t = 0; t < 10000; t++)
-                       // {
-                       //     tt.Add(ms.ToArray().ToList<Byte>());
-                       // }
-                       // Logger.LogCritical(st.ElapsedMilliseconds.ToString());
+                                                                        //var st = new System.Diagnostics.Stopwatch();
+                                                                        //st.Start();
+                                                                        //var tt = new List<List<Byte>>();
+                                                                        //for (var t = 0; t < 10000; t++)
+                                                                        // {
+                                                                        //     tt.Add(ms.ToArray().ToList<Byte>());
+                                                                        // }
+                                                                        // Logger.LogCritical(st.ElapsedMilliseconds.ToString());
 
                         if (myClient.HandleFrame(ms.ToArray().ToList<Byte>(), (int)ms.Length))   // process frame
                         {
@@ -300,26 +308,14 @@ namespace HAServer
         // Shut down session and remove MQTT object from clients list
         private async static void CloseWSSess(MQTTServer MQTTSess, string reason)
         {
-            try
+            MQTTSess.CloseMQTTClient("WebSocket closed, reason: " + reason);                // Remove subscriptions
+            if (MQTTSess.websocket.State == WebSocketState.Open)
             {
-                MQTTSess.CloseMQTTClient("WebSocket closed, reason: " + reason);                // Remove subscriptions
-                if (MQTTSess.websocket.State == WebSocketState.Open)
-                {
-                    await MQTTSess.websocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Closing WebSocket, reason: " + reason, CancellationToken.None);
-                }
-                else
-                {
-                    await MQTTSess.websocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing WebSocket, reason: " + reason, CancellationToken.None);
-                }
-                MQTTSess.websocket.Dispose();
-                WebServices.clients.TryRemove(MQTTSess.name, out MQTTServer notUsed);
-                MQTTSess = null;
+                await MQTTSess.websocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, "Closing WebSocket, reason: " + reason, CancellationToken.None);
             }
-            catch (Exception ex)
-            {
-                Logger.LogError("Closing WebSocket session, reason: " + ex.ToString());
-                throw;
-            }
+            MQTTSess.websocket.Dispose();
+            WebServices.clients.TryRemove(MQTTSess.name, out MQTTServer notUsed);
+            MQTTSess = null;
         }
     }
 }

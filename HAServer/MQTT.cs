@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using Microsoft.Extensions.Logging;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 
 
 //TODO: Chnage timeout constants to production values
@@ -21,6 +22,7 @@ namespace HAServer
         public string IPAddr;
         public string port;
         public string name;
+        public string routeName;
         public string clientID;
         public string willTopic;
         public string willMessage;
@@ -39,24 +41,29 @@ namespace HAServer
 
         static public ILogger Logger = ApplicationLogging.CreateLogger<MQTTServer>();
 
+        public delegate void TimeoutEventDel(MQTTServer MQTTSess, String reason);
+        public event TimeoutEventDel TimeoutEvent;
+
         // Constructor for MQTT over TCP
-        public MQTTServer(Socket TCPSocket, string clientIP, string clientPort)
+        public MQTTServer(Socket TCPSocket, string clientIP, string clientPort, [CallerFilePath] string route = "")
         {
             socket = TCPSocket;
             websocket = null;
-            Init(clientIP, clientPort);
+            Init(clientIP, clientPort, route);
         }
 
         // Constructor for MQTT over WebSockets
-        public MQTTServer(WebSocket clientWebsocket, string clientIP, string clientPort)
+        public MQTTServer(WebSocket clientWebsocket, string clientIP, string clientPort, [CallerFilePath] string route = "")
         {
             websocket = clientWebsocket;
             socket = null;
-            Init(clientIP, clientPort);
+            Init(clientIP, clientPort, route);
         }
 
-        private void Init(string clientIP, string clientPort)
+        private void Init(string clientIP, string clientPort, string route)
         {
+            routeName = Path.GetFileNameWithoutExtension(route);
+
             flags = new ProtFlags
             {
                 gotLen = false,
@@ -64,6 +71,7 @@ namespace HAServer
                 lenMult = 1,
                 bufIndex = 0
             };
+
             control = 0;
             connected = false;
             clientID = null;
@@ -78,9 +86,9 @@ namespace HAServer
             topics = new List<Topic>();
             buffer = new List<Byte>();
             pingCB = ClientTimeout;
-            MQTTPingTimeout = new Timer(pingCB, null, 1000 * CLIENT_TIMEOUT, 1000 * CLIENT_TIMEOUT);
+            MQTTPingTimeout = new Timer(pingCB, null, Timeout.Infinite, Timeout.Infinite);
             frameCB = FrameTimeout;
-            frameTimeout = new Timer(frameCB, null, 1000 * FRAME_TIMEOUT, 1000 * FRAME_TIMEOUT);
+            frameTimeout = new Timer(frameCB, null, Timeout.Infinite, Timeout.Infinite);
         }
 
         public void StartFrameTimeout()
@@ -148,7 +156,6 @@ namespace HAServer
 
                         if (flags.bytesToGet == 0)           // received all the frame
                         {
-                            //Console.WriteLine("to get: " + wsFlags.bytesToGet);
                             HandleWSBinMsg();
                         }
                         break;                  // exit loop
@@ -186,36 +193,42 @@ namespace HAServer
                                 return false;
                             }
                             break;
+
                         case PROTOCOL_NAME_V311:
                             if (buffer.ElementAt(bufIndex) != PROTOCOL_NAME_V311_LEVEL_VAL)
                             {
                                 Logger.LogError("Invalid MQTT protocol level for 3.11");                  // Invalid protocol level for 3.1.1
                                 return false;
                             }
+                            break;
 
-                            break;
                         default:
-                            //TODO: protocol name not supported
-                            break;
+                            Logger.LogError("MQTT protocol number not supported: " + MQTTver);
+                            return false;
                     }
+
                     if ((buffer.ElementAt(++bufIndex) & 0b00000001) == 0b00000001)
                     {
-                        //TODO: First flag bit can't be 1
+                        Logger.LogError("MQTT connect flag can't be 1");
+                        return false;
                     }
+
                     connFlags.clean = (buffer.ElementAt(bufIndex) & 0b00000010) == 0b00000010;
                     connFlags.will = (buffer.ElementAt(bufIndex) & 0b00000100) == 0b00000100;
                     connFlags.willQoS = (uint)(buffer.ElementAt(bufIndex) & 0b00011000) >> 4;
                     connFlags.willRetain = (buffer.ElementAt(bufIndex) & 0b00100000) == 0b00100000;
                     connFlags.passFlg = (buffer.ElementAt(bufIndex) & 0b01000000) == 0b01000000;
                     connFlags.userFlg = (buffer.ElementAt(bufIndex) & 0b10000000) == 0b10000000;
+                    connFlags.keepAlive = buffer.ElementAt(++bufIndex) * 256 + buffer.ElementAt(++bufIndex);
 
-                    connFlags.keepAlive = (uint)(buffer.ElementAt(++bufIndex) * 256 + buffer.ElementAt(++bufIndex));
-                    if (connFlags.keepAlive != 0)
+                    if (connFlags.keepAlive == 0)
                     {
-                        //TODO: Set timer so that if client does not send anything in 1.5x keepalive seconds, disconnect the client & reset session
+                        connFlags.keepAlive = Timeout.Infinite;
                     }
+
                     bufIndex++;
                     clientID = GetUTF8(ref buffer, ref bufIndex);
+
                     if (clientID == "")
                     {
                         if (!connFlags.clean)
@@ -251,44 +264,52 @@ namespace HAServer
                     // ConnAck
                     byte connAckFlg = connFlags.clean ? (Byte)0b00000000 : (Byte)0b00000001;
                     byte connAckRet = connFlags.clean ? (Byte)0b00000000 : (Byte)0b00000001;
+
                     //If the Server accepts a connection with CleanSession set to 0, the value set in Session Present depends on whether the Server already has stored Session state for the supplied client ID.If the Server has stored Session state, it MUST set SessionPresent to 1 in the CONNACK packet[MQTT - 3.2.2 - 2].If the Server does not have stored Session state, it MUST set Session Present to 0 in the CONNACK packet.This is in addition to setting a zero return code in the CONNACK packe
                     MQTTSend(new List<byte> { MQTT_MSG_CONNACK_TYPE << 4, MSG_ACK_LEN, connAckFlg, connAckRet });
+
                     Logger.LogInformation("Client [" + IPAddr + "] MQTT session established");
                     connected = true;
                     break;
 
                 case MQTT_MSG_PUBLISH_TYPE:
+                    //TODO: retain logic for storing messages. 
+
                     var pubFlags = new PubFlags()
                     {
                         dup = ((control & 0b00001000) == 0b00001000),
                         QoS = (control & 0b00000110) >> 1,
                         retain = ((control & 0b00000001) == 0b00000001)
                     };
+
                     if (pubFlags.QoS > QOS_LEVEL_EXACTLY_ONCE)
                     {
                         Logger.LogError("Wrong QoS in MQTT request specified: " + pubFlags.QoS);
                         return false;
                     }
+
                     var pubTopic = GetUTF8(ref buffer, ref bufIndex);
 
                     Byte pubIDMSB = 0;
                     Byte pubIDLSB = 0;
+
                     if (pubFlags.QoS > QOS_LEVEL_AT_MOST_ONCE)
                     {
                         pubIDMSB = buffer.ElementAt(bufIndex);
                         pubIDLSB = buffer.ElementAt(++bufIndex);
                         bufIndex++;
                     }
+
                     var pubMsg = buffer.Skip(bufIndex).ToList<Byte>();                   // remaining bytes is the publish message (binary form not text)
 
                     var pubDataHA = new ASCIIEncoding().GetString(pubMsg.ToArray());
                     List<String> pubTopicHA = new List<String>(pubTopic.Split('\\'));
 
-                    // Only publish valid HA format
-                    if (pubTopicHA.Count == 4)
+                    if (pubTopicHA.Count == 4)                                          // Only publish valid HA format
                     {
                         if (Core._debug) Logger.LogDebug("Client [" + IPAddr + "] published topic: " + pubTopic + " Data: " + pubDataHA);
-                        Core.pubSub.Publish(new Interfaces.ChannelKey
+
+                        Core.pubSub.Publish(new Interfaces.ChannelKey                   // put on the message queue
                         {
                             network = Commons.Globals.networkName,
                             category = pubTopicHA[0],
@@ -300,6 +321,7 @@ namespace HAServer
                         {
                             MQTTSend(new List<byte> { MQTT_MSG_PUBACK_TYPE << 4, MSG_ACK_LEN, pubIDMSB, pubIDLSB });
                         }
+
                         if (pubFlags.QoS == QOS_LEVEL_EXACTLY_ONCE)
                         {
                             MQTTSend(new List<byte> { MQTT_MSG_PUBREC_TYPE << 4, MSG_ACK_LEN, pubIDMSB, pubIDLSB });
@@ -311,10 +333,6 @@ namespace HAServer
                     {
                         Logger.LogWarning("Client [" + IPAddr + "] specified incorrect topic: " + pubTopic + ", not published");
                     }
-
-                    //TODO: retain logic for storing messages. 
-                    //TODO: Submit to queue, check that this client can submit to the queue, else close the connection
-
                     break;
 
                 case MQTT_MSG_PUBREL_TYPE:
@@ -343,7 +361,6 @@ namespace HAServer
                     var subIDLSB = buffer.ElementAt(++bufIndex);
                     bufIndex++;
 
-                    //var subTopics = new List<Topic>();
                     var subRegRes = new List<Byte>();
                     while (bufIndex < buffer.Count)                                         // Save topics subscribed to and their QoS
                     {
@@ -352,6 +369,9 @@ namespace HAServer
                             topicName = GetUTF8(ref buffer, ref bufIndex),
                             qos = buffer.ElementAt(bufIndex++)
                         };
+
+                        //var route = (websocket != null) ? "WebServices" : "SocketServices";         // TODO: Hardcoded message routing....
+
                         //TODO: Register subscription, remove earlier subscriptions to the same topic, test for QoS > 2, or null topic
                         if (true)               // TODO: Check that server accepts QoS level
                         {
@@ -367,7 +387,7 @@ namespace HAServer
                                     category = subTopicHA[0],
                                     className = subTopicHA[1],
                                     instance = subTopicHA[2]
-                                });
+                                }, routeName);
                             }
                             else
                             {
@@ -403,8 +423,8 @@ namespace HAServer
                         {
                             if (topics[i].topicName.ToUpper() == untopic.ToUpper())
                             {
+                                UnSubscribe(topics[i]);
                                 topics.RemoveAt(i);                                         // remove all topics unsubscribed from client topic list & message queue subscriptions
-                                //TODO: Handle queue unsubscribe
                             }
                         }
                     }
@@ -466,7 +486,7 @@ namespace HAServer
             MQTTSend(pub);
         }
 
-        // Send to client 
+        // Send to client as binary
         private async void MQTTSend(List<Byte> resp)
         {
             if (Core._debug)
@@ -494,11 +514,13 @@ namespace HAServer
         // Reset frame state variables to prepare for new frame
         private void resetFrame()
         {
-            MQTTPingTimeout.Change(1000 * CLIENT_TIMEOUT, 1000 * CLIENT_TIMEOUT);
+            MQTTPingTimeout.Change((int)(1000 * connFlags.keepAlive * 1.5), (int)(1000 * connFlags.keepAlive * 1.5));
+
             flags.gotLen = false;
             flags.bufIndex = 0;
             flags.lenMult = 1;
             flags.procRemLen = 0;
+
             waitOnPubRel = 0;
             numFrames++;
             buffer = new List<byte>();
@@ -506,14 +528,12 @@ namespace HAServer
 
         private void FrameTimeout(Object stateInfo)
         {
-            //TODO: How do I close the websocket session from here?
-            CloseMQTTClient("MQTT frame timed out");
+            TimeoutEvent(this, "MQTT frame timed out");
         }
 
         private void ClientTimeout(Object stateInfo)
         {
-            //TODO: How do I close the websocket session from here?
-            CloseMQTTClient("MQTT client timed out");
+            TimeoutEvent(this, "MQTT client timed out");
         }
 
         // Close client MQTT session (network session needs to be closed by network session layer)
@@ -522,21 +542,26 @@ namespace HAServer
             frameTimeout.Dispose();
             MQTTPingTimeout.Dispose();
             Logger.LogInformation("Closing MQTT session for client [" + name + "], reason: " + reason);
+
             foreach (var topic in topics)                                   // unsubscribe to all client topics subscriptions
             {
-                List<String> topicHA = new List<String>(topic.topicName.Split('\\'));
-                if (Core._debug) Logger.LogDebug("Client [" + IPAddr + "] unsubscribed to " + topic.topicName);
-                Core.pubSub.UnSubscribe(IPAddr, new Interfaces.ChannelKey
-                {
-                    network = Commons.Globals.networkName,
-                    category = topicHA[0],
-                    className = topicHA[1],
-                    instance = topicHA[2]
-                });
+                UnSubscribe(topic);
             }
         }
 
+        // Unsubscribe from PubSub subscription store
+        private int UnSubscribe(Topic unSubTopic)
+        {
+            List<String> topicHA = new List<String>(unSubTopic.topicName.Split('\\'));
+            return Core.pubSub.UnSubscribe(name, new Interfaces.ChannelKey
+            {
+                network = Commons.Globals.networkName,
+                category = topicHA[0],
+                className = topicHA[1],
+                instance = topicHA[2]
+            }, routeName);
 
+        }
 
         // Get UTF-8 char string of length determined by 1st and 2nd bytes in buffer segment
         private string GetUTF8(ref List<Byte> buffer, ref int bufIndex)
@@ -555,7 +580,7 @@ namespace HAServer
             public bool willRetain;
             public bool passFlg;
             public bool userFlg;
-            public uint keepAlive;
+            public int keepAlive;
         }
 
         public struct Topic
@@ -582,10 +607,8 @@ namespace HAServer
 
         // Misc
         internal const byte MSG_FLAG_BITS_MASK = 0b00001111;
-        internal const int CLIENT_TIMEOUT = 25;         // number of seconds to timeout since client last sent message
-        internal const int FRAME_TIMEOUT = 5;         // full WS MQTT frame not received
-        //internal const int CLIENT_TIMEOUT = 100;         // number of seconds to timeout since client last sent message
-        //internal const int FRAME_TIMEOUT = 30;         // full WS MQTT frame not received
+//        internal const int CLIENT_TIMEOUT = 25;                                             // number of seconds to timeout since client last sent message or ping
+        internal const int FRAME_TIMEOUT = 5;                                               // full WS MQTT frame not received
         internal const byte MSG_ACK_LEN = 2;
         internal const byte QOS_LEVEL_GRANTED_FAILURE = 0x80;
         internal const byte PUB_DUP_TRUE = 0b00001000;
